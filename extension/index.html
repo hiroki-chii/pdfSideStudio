@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#6252c8" />
+    <title>PDF Side Studio</title>
+  </head>
+  <body>
+    <div class="app">
+      <header class="app-header">
+        <div class="brand"><span class="brand-mark" aria-hidden="true">P<span>✦</span></span><div><h1>PDF Side Studio</h1><p>PDFを、手元で自由に。</p></div></div>
+        <button id="help" class="icon-button" aria-label="使い方を表示" title="使い方">?</button>
+      </header>
+      <main>
+        <div class="theme-row"><button id="theme-mode" class="theme-toggle" type="button" data-mode="system" aria-label="表示モード: デバイスと同じ。クリックでダークに切り替え" title="表示モード: デバイスと同じ（次: ダーク）"><svg data-theme-icon="dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14a8.5 8.5 0 0 1-10.5-10.5A8.5 8.5 0 1 0 20.5 14Z" /></svg><svg data-theme-icon="light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg><svg data-theme-icon="system" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M9 21h6m-3-4v4" /></svg></button></div>
+        <section id="drop-zone" class="upload-card" aria-label="PDFを追加">
+          <input id="file-input" type="file" accept="application/pdf,.pdf" multiple hidden />
+          <button id="add-files" class="upload-button"><span class="upload-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2v20M2 12h20" /></svg></span><span><strong>PDFを追加</strong><small>クリック、またはここにドロップ</small></span><span class="file-tag">PDF</span></button>
+          <p class="privacy"><span aria-hidden="true">◈</span> 端末内で処理 · アップロード不要</p>
+        </section>
+        <div id="status" class="status" role="status" aria-live="polite">PDFを追加して編集をはじめましょう。</div>
+        <section id="empty-state" class="empty-state">
+          <div class="paper-art" aria-hidden="true"><div class="back-paper"></div><div class="front-paper"><span class="paper-label">PDF</span><i></i><i></i><i></i><span class="paper-spark">✦</span></div></div>
+          <h2>ちょっとした編集を、<br />このパネルひとつで。</h2>
+          <p>資料をまとめる。必要なページを取り出す。<br />メモを添えて、そのまま保存。</p>
+          <div class="feature-chips"><span>結合・分割</span><span>回転</span><span>ペン</span><span>透かし</span></div>
+          <p class="empty-note">複数のPDFを追加すると、ひとつに結合できます。</p>
+        </section>
+        <section id="workspace" hidden>
+          <section id="page-list-section" class="page-list-section" aria-labelledby="page-list-title">
+            <div class="section-heading"><h2 id="page-list-title">ページ <span id="page-count" class="count">0</span></h2></div>
+            <div id="source-legend" class="source-legend" aria-label="追加したPDF"></div>
+            <p id="page-drag-hint" class="page-drag-hint">ドラッグで並べ替え · ページにカーソルを合わせてコピー・削除</p>
+            <div id="page-list" class="page-list" aria-label="ページ一覧" aria-describedby="page-drag-hint"></div>
+          </section>
+          <section class="preview-section" aria-label="ページプレビュー">
+            <div class="preview-topbar">
+              <div class="preview-heading"><span id="preview-title">プレビュー</span><span id="preview-size"></span></div>
+              <div class="preview-history" role="group" aria-label="編集履歴"><button id="undo" title="元に戻す"><span aria-hidden="true">↶</span> 元に戻す</button><button id="redo" title="やり直す"><span aria-hidden="true">↷</span> やり直す</button></div>
+            </div>
+            <div class="preview-toolbar">
+              <div class="preview-tools" role="group" aria-label="編集ツール">
+                <button id="open-select" class="preview-tool-button" type="button" aria-label="選択モード" aria-controls="panel-select" aria-pressed="true" title="選択・移動（Esc）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 10-7 1-3 7-4-18Z"/></svg><span>選択</span></button>
+                <button id="open-pen" class="preview-tool-button" type="button" aria-label="ペンの設定" aria-controls="panel-pen" aria-pressed="false" title="ペン・図形を描く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15l-1 6Z"/></svg><span>ペン</span></button>
+                <button id="open-text" class="preview-tool-button" type="button" aria-label="テキストボックスを配置" aria-controls="panel-text" aria-pressed="false" title="紙面をクリックしてテキストを配置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M12 5v15M8 20h8M4 5v3M20 5v3"/></svg><span>テキスト</span></button>
+                <button id="open-rotation" class="preview-tool-button" type="button" aria-label="ページを回転" aria-controls="panel-rotation" aria-pressed="false" title="ページの回転設定を開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 2 8M4 4v6h6"/></svg><span>回転</span></button>
+                <button id="open-watermark" class="preview-tool-button" type="button" aria-label="透かしの設定" aria-controls="panel-watermark" aria-pressed="false" title="透かしの設定を開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3s-7 8-7 12a7 7 0 0 0 14 0c0-4-7-12-7-12Z"/><path d="M8 15a4 4 0 0 0 4 4"/></svg><span>透かし</span></button>
+              </div>
+            </div>
+            <section id="panel-select" class="preview-menu" aria-labelledby="select-menu-title" hidden>
+              <div class="preview-menu-heading"><h2 id="select-menu-title">オブジェクトを選択</h2></div>
+              <p class="tool-hint">プレビュー上のテキスト・描画・透かしをクリックして選択してください。選択したオブジェクトの設定が表示されます。</p>
+              <p class="subtle">選択後はドラッグで移動、Deleteキーで削除できます。新しく描く・文字を追加するときは上のツールを選びます。元のPDFの文字や画像は選択できません。</p>
+            </section>
+            <section id="panel-rotation" class="preview-menu" aria-labelledby="rotation-menu-title" hidden>
+              <div class="preview-menu-heading"><h2 id="rotation-menu-title">ページを回転</h2><button id="close-rotation" type="button">選択に戻る</button></div>
+              <div class="inline-field"><label class="scope-label" for="rotation-scope">対象</label><select id="rotation-scope"><option value="active">表示中のページ</option><option value="all">すべてのページ</option></select></div>
+              <p id="rotation-target-hint" class="target-hint" aria-live="polite"></p>
+              <div class="action-grid rotation-actions"><button id="rotate-left">↶ 左に90°</button><button id="rotate-right">↷ 右に90°</button></div>
+              <p class="subtle">方向ボタンを押すと回転します。「元に戻す」で取り消せます。</p>
+            </section>
+            <section id="panel-pen" class="preview-menu" aria-labelledby="pen-menu-title" hidden>
+              <div class="preview-menu-heading"><h2 id="pen-menu-title">ペンの設定</h2><button id="close-pen" type="button">描画を終了</button></div>
+              <p id="pen-mode-hint" class="tool-hint">紙面をドラッグして描きます。終了するには「描画を終了」かEsc。</p>
+              <div id="pen-drawing-settings">
+              <div class="inline-field"><label class="scope-label" for="pen-tool">描く形</label><select id="pen-tool"><option value="pen">フリーハンド</option><option value="line">直線</option><option value="ellipse">丸（楕円）</option><option value="rectangle">四角（長方形）</option></select></div>
+              <div class="pen-settings"><label>色 <input id="pen-color" type="color" value="#e05267" /></label><label class="range-label">太さ <input id="pen-width" type="range" min="1" max="40" value="3" /><output id="pen-width-value">3</output></label></div>
+              <label class="pen-opacity range-label" for="pen-transparency">透明度 <input id="pen-transparency" type="range" min="0" max="95" value="0" /><output id="pen-transparency-value">0%</output></label>
+              <p class="tool-hint">透明度を上げるとマーカーに。丸・四角はShiftを押しながらドラッグすると正円・正方形になります。</p>
+              <p class="subtle">設定は次に描く線・図形に適用されます。</p>
+              <details class="bulk-actions"><summary>このページの描画をまとめて消去</summary><p class="subtle">ペン・図形をすべて消去します。テキストは残ります。</p><button id="clear-ink" class="danger" type="button">このページの全描画を消去</button></details>
+              </div>
+              <div id="stroke-selection-actions" hidden><div class="action-grid"><button id="start-pen" type="button">新しく描く</button><button id="delete-stroke" class="danger">選択した描画を削除</button></div><p class="subtle">ドラッグまたは方向キーで移動。Shift＋方向キーで10pt移動。「元に戻す」で移動・削除を取り消せます。</p></div>
+            </section>
+            <section id="panel-watermark" class="preview-menu" aria-labelledby="watermark-menu-title" hidden>
+              <div class="preview-menu-heading"><h2 id="watermark-menu-title">透かしの設定</h2><button id="close-watermark" type="button">選択に戻る</button></div>
+              <label class="field-label" for="watermark-text">透かしのテキスト</label><input id="watermark-text" class="full-input" value="社外秘" maxlength="80" placeholder="例: 社外秘 / DRAFT" />
+              <div class="watermark-settings"><label>色 <input id="watermark-color" type="color" value="#736c90" /></label><label class="range-label">濃さ <input id="watermark-opacity" type="range" min="5" max="70" value="20" /><output id="watermark-opacity-value">20%</output></label></div>
+              <div class="inline-field"><label class="scope-label" for="watermark-scope">対象</label><select id="watermark-scope"><option value="active">表示中のページ</option><option value="all" selected>すべてのページ</option></select></div>
+              <p id="watermark-target-hint" class="target-hint" aria-live="polite"></p>
+              <div class="action-grid watermark-actions"><button id="apply-watermark" class="accent-button">透かしを適用</button><button id="remove-watermark" class="danger">透かしを削除</button></div><p class="subtle">設定は「適用」で反映され、対象ページの追加済み透かしを置き換えます。削除できるのはこの編集で追加した透かしです。</p>
+            </section>
+            <section id="panel-text" class="preview-menu" aria-labelledby="text-menu-title" hidden>
+              <div class="preview-menu-heading"><h2 id="text-menu-title">テキストを配置</h2><button id="close-text" type="button">配置を終了</button></div>
+              <p id="text-mode-hint" class="tool-hint">紙面を1回クリックして入力します。</p>
+              <div class="text-settings"><label>色 <input id="text-color" type="color" value="#222222" /></label><label>文字サイズ <input id="text-size" type="number" min="8" max="96" value="24" /> pt</label></div>
+              <div id="text-selection-actions" class="action-grid text-actions" hidden><button id="update-text">内容を編集</button><button id="delete-text" class="danger">選択テキストを削除</button></div>
+              <div id="text-edit-actions" class="action-grid text-actions" hidden><button id="confirm-text" class="accent-button" type="button">入力を確定</button><button id="cancel-text" type="button">入力を取り消す</button></div>
+              <p id="text-edit-hint" class="subtle">外側クリック・Ctrl+Enterで確定。新規入力中のEscは確定、再編集中のEscは変更を取り消します。配置後は選択モードに戻ります。続けて追加するには上の「テキスト」を押します。</p>
+            </section>
+            <div id="preview-area" class="preview-area"><button id="previous" class="preview-nav preview-nav-previous" aria-label="前のページ" title="前のページ（←キー）" aria-keyshortcuts="ArrowLeft"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m14 6-6 6 6 6"/></svg></button><div id="canvas-stack" class="canvas-stack"><canvas id="pdf-canvas" aria-label="PDFプレビュー"></canvas><canvas id="ink-canvas" aria-label="ページへの書き込み領域"></canvas><div id="text-handles" aria-label="挿入したテキストと描画"></div></div><button id="next" class="preview-nav preview-nav-next" aria-label="次のページ" title="次のページ（→キー）" aria-keyshortcuts="ArrowRight"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m10 6 6 6-6 6"/></svg></button><span id="render-status" class="render-status" hidden>読み込み中…</span></div>
+            <div class="preview-footer"><span id="page-position" aria-live="polite"></span></div>
+          </section>
+        </section>
+      </main>
+      <button id="open-save" class="save-launcher" type="button" aria-label="保存設定を開く" aria-haspopup="dialog" aria-controls="save-dialog" title="PDFを保存" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg>保存</button>
+    </div>
+    <dialog id="save-dialog" aria-labelledby="save-dialog-title">
+      <div class="dialog-heading"><h2 id="save-dialog-title">PDFを保存</h2><button id="close-save" class="icon-button" aria-label="保存設定を閉じる" title="閉じる">×</button></div>
+      <div class="save-settings">
+        <label class="field-label" for="output-name">保存ファイル名</label><div class="filename-field"><input id="output-name" value="edited" maxlength="120" autofocus /></div>
+        <button id="save" class="save-button">PDFを保存 <span id="save-count"></span><span aria-hidden="true">↓</span></button>
+        <button id="split" class="split-button">1ページずつ分割（ZIP） <span id="split-count"></span></button>
+        <p class="split-note">全ページを個別のPDFにしてZIPで保存します。</p>
+        <p id="save-status" class="status" role="status" aria-live="polite" hidden></p>
+        <p class="save-note">編集はこのパネル内だけに保持されます。閉じる前に保存してください。</p>
+      </div>
+    </dialog>
+    <dialog id="help-dialog"><div class="dialog-heading"><h2>使い方</h2><button id="close-help" class="icon-button" aria-label="使い方を閉じる">×</button></div><ol><li>PDFを追加します。複数ファイルは追加順に結合されます。</li><li>プレビュー上のページ一覧をドラッグして順序を変更します。クリックするとプレビューが切り替わり、そのページのコピー・削除を選べます。</li><li>コピー・削除はページ一覧から選んだページに適用します。回転・透かしは表示中のページ／すべてのページを指定できます。</li><li>「PDFを保存」で全ページを出力します。分割は保存画面から実行します。</li></ol><p>分割では全ページを1ページずつPDFにしてZIPで保存します。</p><p>パスワード保護PDFは非対応です。フォーム入力値、注釈、リンク等の保持は保証しません。電子署名は無効になります。元ファイルを残し、保存後のPDFを確認してください。</p><p>1ファイル50MB、合計150MB・300ページまで。編集履歴は直近30操作を保持します。</p><p>ページ上の既存テキストの書き換えや、元PDFに含まれる透かしの除去はできません。</p></dialog>
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>

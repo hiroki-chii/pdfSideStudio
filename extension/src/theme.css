@@ -1,0 +1,38 @@
+.theme-row{display:flex;align-items:center;justify-content:flex-end;margin:0 0 14px}
+.theme-toggle{display:grid;place-items:center;width:34px;height:34px;padding:0;color:var(--purple)}
+.theme-toggle svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.theme-toggle [data-theme-icon]{display:none}
+.theme-toggle[data-mode=dark] [data-theme-icon=dark],.theme-toggle[data-mode=light] [data-theme-icon=light],.theme-toggle[data-mode=system] [data-theme-icon=system]{display:block}
+button,input,select,textarea,dialog{background:var(--surface)}
+button:hover:not(:disabled){background:var(--surface-hover);border-color:var(--border-accent)}
+.brand-mark{background:var(--accent-fill)}
+.upload-card{background:var(--surface-soft);border-color:var(--border-accent)}
+.upload-card.dragging{background:var(--accent-soft);border-color:var(--purple)}
+.upload-icon,.count{background:var(--accent-soft)}
+.upload-icon svg{display:block;width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.5}
+.file-tag,.feature-chips span,.front-paper{background:var(--surface);color:var(--muted)}
+.front-paper,.back-paper{border-color:var(--border-accent)}
+.back-paper{background:var(--accent-soft)}
+.front-paper i{background:var(--paper-line)}
+.privacy{color:var(--muted);border-color:var(--line)}
+.privacy span{color:var(--purple)}
+.status.error{color:var(--error)}
+.status.success{color:var(--success)}
+.page-list{scrollbar-color:var(--scrollbar) transparent}
+.page-button{background:var(--surface)}
+.page-card.active .page-button{background:var(--surface-selected)}
+.page-button .thumb-placeholder{background:var(--tabs-bg);color:var(--muted)}
+.preview-section{background:var(--surface)}
+.preview-area{background:var(--preview-bg)}
+.preview-area .preview-nav{background:var(--nav-bg);border-color:var(--line);box-shadow:0 2px 7px var(--shadow)}
+.render-status{background:var(--nav-bg)}
+.tool-tabs{background:var(--tabs-bg);border-color:var(--line)}
+.tool-tabs button[aria-selected=true]{background:var(--surface)}
+.danger{color:var(--danger)}
+.split-button{background:var(--surface-selected);border-color:var(--border-accent)}
+.accent-button{background:var(--accent-soft);border-color:var(--border-accent)}
+.filename-field{background:var(--surface)}
+.save-button{background:var(--accent-fill);border-color:var(--accent-fill)}
+.save-button:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover)}
+dialog{box-shadow:0 20px 60px var(--shadow)}
+dialog::backdrop{background:var(--dialog-backdrop)}
