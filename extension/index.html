@@ -48,6 +48,8 @@
                 <button id="open-watermark" class="preview-tool-button" type="button" aria-label="透かしの設定" aria-controls="panel-watermark" aria-pressed="false" title="透かしの設定を開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3s-7 8-7 12a7 7 0 0 0 14 0c0-4-7-12-7-12Z"/><path d="M8 15a4 4 0 0 0 4 4"/></svg><span>透かし</span></button>
               </div>
             </div>
+            <div id="preview-area" class="preview-area">
+            <div class="preview-menu-layer">
             <section id="panel-select" class="preview-menu" aria-labelledby="select-menu-title" hidden>
               <div class="preview-menu-heading"><h2 id="select-menu-title">オブジェクトを選択</h2></div>
               <p class="tool-hint">プレビュー上のテキスト・描画・透かしをクリックして選択してください。選択したオブジェクトの設定が表示されます。</p>
@@ -89,7 +91,8 @@
               <div id="text-edit-actions" class="action-grid text-actions" hidden><button id="confirm-text" class="accent-button" type="button">入力を確定</button><button id="cancel-text" type="button">入力を取り消す</button></div>
               <p id="text-edit-hint" class="subtle">外側クリック・Ctrl+Enterで確定。新規入力中のEscは確定、再編集中のEscは変更を取り消します。配置後は選択モードに戻ります。続けて追加するには上の「テキスト」を押します。</p>
             </section>
-            <div id="preview-area" class="preview-area"><button id="previous" class="preview-nav preview-nav-previous" aria-label="前のページ" title="前のページ（←キー）" aria-keyshortcuts="ArrowLeft"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m14 6-6 6 6 6"/></svg></button><div id="canvas-stack" class="canvas-stack"><canvas id="pdf-canvas" aria-label="PDFプレビュー"></canvas><canvas id="ink-canvas" aria-label="ページへの書き込み領域"></canvas><div id="text-handles" aria-label="挿入したテキストと描画"></div></div><button id="next" class="preview-nav preview-nav-next" aria-label="次のページ" title="次のページ（→キー）" aria-keyshortcuts="ArrowRight"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m10 6 6 6-6 6"/></svg></button><span id="render-status" class="render-status" hidden>読み込み中…</span></div>
+            </div>
+            <button id="previous" class="preview-nav preview-nav-previous" aria-label="前のページ" title="前のページ（←キー）" aria-keyshortcuts="ArrowLeft"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m14 6-6 6 6 6"/></svg></button><div id="canvas-stack" class="canvas-stack"><canvas id="pdf-canvas" aria-label="PDFプレビュー"></canvas><canvas id="ink-canvas" aria-label="ページへの書き込み領域"></canvas><div id="text-handles" aria-label="挿入したテキストと描画"></div></div><button id="next" class="preview-nav preview-nav-next" aria-label="次のページ" title="次のページ（→キー）" aria-keyshortcuts="ArrowRight"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m10 6 6 6-6 6"/></svg></button><span id="render-status" class="render-status" hidden>読み込み中…</span></div>
             <div class="preview-footer"><span id="page-position" aria-live="polite"></span></div>
           </section>
         </section>

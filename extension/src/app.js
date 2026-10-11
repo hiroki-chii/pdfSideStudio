@@ -39,6 +39,7 @@ let pageDrag = null;
 const uid = () => crypto.randomUUID();
 const previewMenus = ['rotation', 'pen', 'watermark'];
 let activePreviewMenu = 'select';
+let previewMenuOpen = false;
 const toolDescriptions = {
   'open-select': '追加した文字・描画・透かしをクリックして選択。ドラッグで移動、Deleteで削除。Escで選択モードに戻ります。',
   'open-pen': '色・太さ・透明度を設定して紙面をドラッグ。「描画を終了」またはEscで選択モードに戻ります。',
@@ -91,7 +92,7 @@ function updateControls() {
   $('open-save').disabled = busy || !model.pages.length;
   $('clear-ink').disabled = busy || !model.active?.strokes.some(item => item.tool !== 'text');
   if (!selectedAnnotation()) selectedAnnotationId = null;
-  const visibleMenu = selectedStroke() ? 'pen'
+  const visibleMenu = !previewMenuOpen ? null : selectedStroke() ? 'pen'
     : textEnabled || selectedText() || textEdit ? 'text'
       : selectedAnnotation()?.tool === 'watermark' ? 'watermark' : activePreviewMenu;
   $('open-select').disabled = busy || !model.active;
@@ -162,7 +163,7 @@ function updateControls() {
 function refresh() {
   if (selectedText()) selectAnnotation(selectedText());
   const hasPages = model.pages.length > 0;
-  if (!hasPages) { penEnabled = false; textEnabled = false; resetPreviewMenu(); }
+  if (!hasPages) { previewMenuOpen = false; penEnabled = false; textEnabled = false; resetPreviewMenu(); }
   for (const name of previewMenus) $(`open-${name}`).hidden = !hasPages;
   $('page-list-section').hidden = !hasPages;
   $('workspace').hidden = !hasPages && !model.past.length && !model.future.length;
@@ -627,6 +628,7 @@ function selectPage(id) {
   if (!finishTextEdit()) return;
   textEnabled = false;
   penEnabled = false;
+  previewMenuOpen = false;
   resetPreviewMenu();
   activate(id);
 }
@@ -637,24 +639,37 @@ function resetPreviewMenu() {
   $('watermark-scope').value = 'all';
   document.querySelectorAll('.bulk-actions').forEach(details => { details.open = false; });
 }
-function enableSelection() {
+function enableSelection(showMenu = false) {
   if (busy || stroke || annotationDrag || pageDrag || !finishTextEdit()) return;
+  previewMenuOpen = showMenu;
   penEnabled = false; textEnabled = false; selectedAnnotationId = null;
   resetPreviewMenu(); refreshAnnotationHandles(); updateControls();
 }
-$('open-select').addEventListener('click', enableSelection);
+function togglePreviewMenu(name) {
+  if (busy || stroke || annotationDrag || pageDrag || !model.active) return;
+  if (previewMenuOpen && !$(`panel-${name}`).hidden) {
+    previewMenuOpen = false; updateControls(); return;
+  }
+  if (name === 'select') enableSelection(true);
+  else if (name === 'text') enableTextInsertion();
+  else openPreviewMenu(name);
+}
+$('open-select').addEventListener('click', () => togglePreviewMenu('select'));
 function openPreviewMenu(name) {
   if (busy || stroke || annotationDrag || pageDrag || !model.active) return;
-  if (activePreviewMenu === name && !selectedAnnotationId) return;
+  if (activePreviewMenu === name && !selectedAnnotationId) {
+    previewMenuOpen = true; updateControls(); return;
+  }
   if (!finishTextEdit()) return;
   resetPreviewMenu();
   textEnabled = false; selectedAnnotationId = null;
   penEnabled = name === 'pen';
   activePreviewMenu = name;
+  previewMenuOpen = true;
   refreshAnnotationHandles(); updateControls();
 }
 for (const name of previewMenus) {
-  $(`open-${name}`).addEventListener('click', () => openPreviewMenu(name));
+  $(`open-${name}`).addEventListener('click', () => togglePreviewMenu(name));
   $(`close-${name}`)?.addEventListener('click', () => {
     enableSelection();
     $('open-select').focus({ preventScroll: true });
@@ -725,12 +740,15 @@ function fitText(annotation) {
   return moveText(ctx, annotation, viewport, 0, 0);
 }
 function enableTextInsertion() {
-  if (busy || stroke || annotationDrag || pageDrag || !model.active || textEnabled || textEdit || !finishTextEdit()) return;
+  if (busy || stroke || annotationDrag || pageDrag || !model.active) return;
+  if (textEnabled || textEdit) { previewMenuOpen = true; updateControls(); return; }
+  if (!finishTextEdit()) return;
+  previewMenuOpen = true;
   textEnabled = true; penEnabled = false; selectedAnnotationId = null;
   resetPreviewMenu(); activePreviewMenu = 'text'; refreshAnnotationHandles(); updateControls();
   status('紙面をクリックしてテキストを1つ配置してください。Escで配置を終了します。');
 }
-$('open-text').addEventListener('click', enableTextInsertion);
+$('open-text').addEventListener('click', () => togglePreviewMenu('text'));
 $('close-text').addEventListener('click', () => {
   enableSelection();
   $('open-select').focus({ preventScroll: true });
@@ -846,6 +864,12 @@ document.addEventListener('pointerdown', event => {
   if (!textEdit || event.target === textEdit.editor || event.target.closest('.text-settings')) return;
   if (!finishTextEdit()) { event.preventDefault(); event.stopImmediatePropagation(); }
 }, true);
+// Close after the target handles the click, preserving placement and drawing actions.
+document.addEventListener('click', event => {
+  if (!previewMenuOpen || event.target.closest('.preview-menu, .preview-tool-button')) return;
+  previewMenuOpen = false;
+  updateControls();
+});
 function previewTextFormatting() {
   if (textEdit) { updateTextDraft(); return; }
   if (!selectedText() || !viewport || busy) return;
