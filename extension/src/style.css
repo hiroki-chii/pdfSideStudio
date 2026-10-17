@@ -23,6 +23,16 @@ textarea{font:inherit;min-width:0;border:1px solid var(--line);border-radius:8px
 .preview-menu .pen-settings,.preview-menu .watermark-settings{margin:8px 0;gap:12px}.preview-menu .rotation-actions,.preview-menu .watermark-actions{margin-top:8px}.preview-menu .tool-hint{margin-bottom:6px}.preview-menu .pen-opacity{margin-bottom:6px}.preview-menu .text-settings{flex-wrap:wrap}.preview-menu .inline-field select,.preview-menu .full-input{padding:5px 8px}
 
 /* Keep tool positions stable in narrow Chrome side panels. */
+.preview-section .preview-area{display:block;padding:0 38px 48px}
+.preview-scroll{overflow:auto;scrollbar-gutter:stable;height:140px;padding:17px 6px;overscroll-behavior:contain;scrollbar-color:var(--scrollbar) transparent}
+.preview-scroll:focus-visible{outline:2px solid var(--purple);outline-offset:-2px}
+.preview-paper{display:grid;place-items:center;width:max-content;min-width:100%;min-height:100%}
+.preview-area .preview-nav{bottom:48px}
+.preview-zoom{position:absolute;left:8px;bottom:8px;z-index:2;display:flex;align-items:center;gap:4px;padding:3px;border:1px solid var(--line);border-radius:9px;background:var(--nav-bg)}
+.preview-zoom button{min-width:28px;height:28px;padding:0 6px;font-size:14px}
+.preview-zoom #zoom-fit{font-size:11px}
+.preview-zoom output{min-width:42px;text-align:center;font-size:11px;font-variant-numeric:tabular-nums;color:var(--ink)}
+.preview-area .render-status{left:50%;top:50%;transform:translate(-50%,-50%);white-space:nowrap}
 .preview-topbar{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line)}
 .preview-topbar .preview-heading{flex:1;min-width:0;flex-direction:column;gap:0;padding:0;border:0}
 .preview-topbar #preview-title{max-width:100%}

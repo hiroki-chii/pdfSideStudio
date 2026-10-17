@@ -22,6 +22,10 @@ const thumbnails = new WeakMap();
 let busy = false;
 let penEnabled = false;
 let viewport = null;
+let previewZoom = 1;
+const minPreviewZoom = 0.5;
+const maxPreviewZoom = 4;
+let renderedPageId = null;
 let renderTask = null;
 let renderVersion = 0;
 let stroke = null;
@@ -84,6 +88,10 @@ function updateControls() {
   const index = model.pages.findIndex(p => p.id === model.activeId);
   $('previous').disabled = busy || index <= 0;
   $('next').disabled = busy || index < 0 || index >= model.pages.length - 1;
+  $('zoom-out').disabled = busy || !model.active || previewZoom <= minPreviewZoom;
+  $('zoom-in').disabled = busy || !model.active || previewZoom >= maxPreviewZoom;
+  $('zoom-fit').disabled = busy || !model.active;
+  $('zoom-value').textContent = `${Math.round(previewZoom * 100)}%`;
   $('split').disabled = busy || !model.pages.length;
   $('split-count').textContent = `${model.pages.length}ページ`;
   const rotationCount = $('rotation-scope').value === 'all' ? model.pages.length : Number(!!model.active);
@@ -415,7 +423,32 @@ function navigatePage(offset) {
   else if (rect.right > bounds.right) list.scrollLeft += rect.right - bounds.right + 2;
 }
 
-async function renderPreview() {
+function setPreviewZoom(value) {
+  if (busy || !model.active || stroke || annotationDrag || pageDrag) return;
+  const next = Math.max(minPreviewZoom, Math.min(maxPreviewZoom, value));
+  if (next === previewZoom) return;
+  const scroll = $('preview-scroll');
+  const bounds = scroll.getBoundingClientRect();
+  const paper = $('canvas-stack').getBoundingClientRect();
+  const anchor = paper.width && paper.height ? {
+    x: (bounds.left + scroll.clientWidth / 2 - paper.left) / paper.width,
+    y: (bounds.top + scroll.clientHeight / 2 - paper.top) / paper.height,
+  } : null;
+  previewZoom = next;
+  updateControls();
+  renderPreview(anchor);
+}
+$('zoom-out').addEventListener('click', () => setPreviewZoom(previewZoom - 0.25));
+$('zoom-in').addEventListener('click', () => setPreviewZoom(previewZoom + 0.25));
+$('zoom-fit').addEventListener('click', () => setPreviewZoom(1));
+$('preview-area').addEventListener('wheel', event => {
+  if (!event.ctrlKey || !event.deltaY || !model.active || event.target.closest('.preview-menu')) return;
+  // Keep Ctrl+wheel local to the PDF instead of zooming the entire browser UI.
+  event.preventDefault();
+  setPreviewZoom(previewZoom + (event.deltaY < 0 ? 0.25 : -0.25));
+}, { passive: false });
+
+async function renderPreview(anchor = null) {
   const version = ++renderVersion;
   renderTask?.cancel(); viewport = null; stroke = null; annotationDrag = null;
   $('text-handles').querySelectorAll('.text-handle').forEach(button => button.remove());
@@ -430,12 +463,24 @@ async function renderPreview() {
     const page = await source.preview.getPage(record.index + 1);
     if (version !== renderVersion) return;
     const base = page.getViewport({ scale: 1, rotation: record.rotation });
-    const width = Math.max(80, $('preview-area').clientWidth - 88);
-    const cssScale = Math.min(width / base.width, 390 / base.height);
+    const scroll = $('preview-scroll');
+    const width = Math.max(1, scroll.clientWidth - 12);
+    const fitScale = Math.min(width / base.width, 390 / base.height);
+    const cssScale = fitScale * previewZoom;
+    scroll.style.height = `${Math.max(140, base.height * fitScale + 34)}px`;
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
     const nextViewport = page.getViewport({ scale: cssScale * ratio, rotation: record.rotation });
     $('canvas-stack').style.width = `${base.width * cssScale}px`;
     $('canvas-stack').style.height = `${base.height * cssScale}px`;
+    if (renderedPageId !== record.id) {
+      scroll.scrollLeft = 0; scroll.scrollTop = 0;
+      renderedPageId = record.id;
+    } else if (anchor) {
+      const bounds = scroll.getBoundingClientRect();
+      const paper = $('canvas-stack').getBoundingClientRect();
+      scroll.scrollLeft += paper.left + anchor.x * paper.width - bounds.left - scroll.clientWidth / 2;
+      scroll.scrollTop += paper.top + anchor.y * paper.height - bounds.top - scroll.clientHeight / 2;
+    }
     const canvas = $('pdf-canvas');
     canvas.width = Math.ceil(nextViewport.width); canvas.height = Math.ceil(nextViewport.height);
     $('ink-canvas').width = canvas.width; $('ink-canvas').height = canvas.height;
@@ -895,7 +940,7 @@ function finishTextEdit(cancel = false) {
 // Commit before toolbar/page/export actions so they always see the latest text.
 document.addEventListener('pointerdown', event => {
   if (!event.target.closest('.text-settings')) finishTextFormatting();
-  if (event.target.closest('#confirm-text, #cancel-text, #close-text, #previous, #next, .preview-tool-button')) return;
+  if (event.target.closest('#confirm-text, #cancel-text, #close-text, #previous, #next, .preview-tool-button, .preview-zoom')) return;
   if (!textEdit || event.target === textEdit.editor || event.target.closest('.text-settings')) return;
   if (!finishTextEdit()) { event.preventDefault(); event.stopImmediatePropagation(); }
 }, true);
@@ -1119,6 +1164,7 @@ document.addEventListener('keydown', event => {
     return;
   }
   if (event.target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])') || $('help-dialog').open || $('save-dialog').open || busy || event.defaultPrevented || event.isComposing) return;
+  if (event.target === $('preview-scroll') && $('preview-scroll').scrollWidth > $('preview-scroll').clientWidth && ['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
   if (event.key === 'Delete' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && selectedAnnotation() && !textEdit && !stroke && !annotationDrag && !pageDrag) {
     event.preventDefault(); run(deleteSelectedAnnotation); return;
   }
@@ -1134,5 +1180,11 @@ document.addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); openSaveDialog(); }
 });
 let resizeTimer;
-new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(renderPreview, 120); }).observe($('preview-area'));
+let previewWidth = 0;
+new ResizeObserver(entries => {
+  const width = entries[0].contentRect.width;
+  if (width === previewWidth) return;
+  previewWidth = width;
+  clearTimeout(resizeTimer); resizeTimer = setTimeout(() => renderPreview(), 120);
+}).observe($('preview-area'));
 refresh();

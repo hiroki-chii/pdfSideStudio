@@ -92,7 +92,16 @@
               <p id="text-edit-hint" class="subtle">外側クリック・Ctrl+Enterで確定。新規入力中のEscは確定、再編集中のEscは変更を取り消します。配置後は選択モードに戻ります。続けて追加するには上の「テキスト」を押します。</p>
             </section>
             </div>
-            <button id="previous" class="preview-nav preview-nav-previous" aria-label="前のページ" title="前のページ（←キー）" aria-keyshortcuts="ArrowLeft"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m14 6-6 6 6 6"/></svg></button><div id="canvas-stack" class="canvas-stack"><canvas id="pdf-canvas" aria-label="PDFプレビュー"></canvas><canvas id="ink-canvas" aria-label="ページへの書き込み領域"></canvas><div id="text-handles" aria-label="挿入したテキストと描画"></div></div><button id="next" class="preview-nav preview-nav-next" aria-label="次のページ" title="次のページ（→キー）" aria-keyshortcuts="ArrowRight"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m10 6 6 6-6 6"/></svg></button><span id="render-status" class="render-status" hidden>読み込み中…</span></div>
+            <button id="previous" class="preview-nav preview-nav-previous" aria-label="前のページ" title="前のページ（←キー）" aria-keyshortcuts="ArrowLeft"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m14 6-6 6 6 6"/></svg></button>
+            <div id="preview-scroll" class="preview-scroll" tabindex="0" role="region" aria-label="プレビューのスクロール領域" title="Ctrl＋マウスホイールで拡大・縮小"><div class="preview-paper"><div id="canvas-stack" class="canvas-stack"><canvas id="pdf-canvas" aria-label="PDFプレビュー"></canvas><canvas id="ink-canvas" aria-label="ページへの書き込み領域"></canvas><div id="text-handles" aria-label="挿入したテキストと描画"></div></div></div></div>
+            <button id="next" class="preview-nav preview-nav-next" aria-label="次のページ" title="次のページ（→キー）" aria-keyshortcuts="ArrowRight"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m10 6 6 6-6 6"/></svg></button>
+            <div class="preview-zoom" role="group" aria-label="プレビューの拡大・縮小">
+              <button id="zoom-out" type="button" aria-label="プレビューを縮小" title="縮小（最小50%）">−</button>
+              <output id="zoom-value" aria-live="polite" aria-label="プレビュー倍率（全体表示を100%とする）">100%</output>
+              <button id="zoom-in" type="button" aria-label="プレビューを拡大" title="拡大（最大400%）">＋</button>
+              <button id="zoom-fit" type="button" title="紙面全体が収まる倍率に戻す">全体表示</button>
+            </div>
+            <span id="render-status" class="render-status" hidden>読み込み中…</span></div>
             <div class="preview-footer"><span id="page-position" aria-live="polite"></span></div>
           </section>
         </section>
