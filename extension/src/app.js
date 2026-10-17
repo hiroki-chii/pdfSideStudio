@@ -939,12 +939,21 @@ function finishTextEdit(cancel = false) {
 
 // Commit before toolbar/page/export actions so they always see the latest text.
 document.addEventListener('pointerdown', event => {
+  // Dismiss tool settings before the preview can start an editing gesture.
+  if (previewMenuOpen && (!$('panel-pen').hidden || !$('panel-text').hidden)
+    && event.target.closest('#preview-scroll') && !event.target.closest('.text-editor')
+    && event.button === 0 && event.isPrimary) {
+    previewMenuOpen = false;
+    updateControls();
+    event.preventDefault(); event.stopImmediatePropagation();
+    return;
+  }
   if (!event.target.closest('.text-settings')) finishTextFormatting();
   if (event.target.closest('#confirm-text, #cancel-text, #close-text, #previous, #next, .preview-tool-button, .preview-zoom')) return;
   if (!textEdit || event.target === textEdit.editor || event.target.closest('.text-settings')) return;
   if (!finishTextEdit()) { event.preventDefault(); event.stopImmediatePropagation(); }
 }, true);
-// Close after the target handles the click, preserving placement and drawing actions.
+// Dismiss menus on other outside clicks after the target handles its action.
 document.addEventListener('click', event => {
   if (!previewMenuOpen || event.target.closest('.preview-menu, .preview-tool-button')) return;
   previewMenuOpen = false;

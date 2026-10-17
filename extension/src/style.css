@@ -24,7 +24,7 @@ textarea{font:inherit;min-width:0;border:1px solid var(--line);border-radius:8px
 
 /* Keep tool positions stable in narrow Chrome side panels. */
 .preview-section .preview-area{display:block;padding:0 38px 48px}
-.preview-scroll{overflow:auto;scrollbar-gutter:stable;height:140px;padding:17px 6px;overscroll-behavior:contain;scrollbar-color:var(--scrollbar) transparent}
+.preview-scroll{overflow:auto;scrollbar-gutter:stable;height:140px;padding:17px 6px;scrollbar-color:var(--scrollbar) transparent}
 .preview-scroll:focus-visible{outline:2px solid var(--purple);outline-offset:-2px}
 .preview-paper{display:grid;place-items:center;width:max-content;min-width:100%;min-height:100%}
 .preview-area .preview-nav{bottom:48px}
