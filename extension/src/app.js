@@ -8,6 +8,7 @@ import { EditorModel, safeFilename, MAX_FILE_BYTES, MAX_TOTAL_BYTES, MAX_PAGES, 
 import { buildPdf, imagePlacement, paintOverlay, textLayout, moveText, strokeLayout, moveStroke, watermarkLayout, moveWatermark } from './pdf.js';
 import { createThemeController } from './theme.js';
 import { storePrintJob, deletePrintJob } from './print-job.js';
+import { createFullscreenPreview } from './fullscreen-preview.js';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 const $ = id => document.getElementById(id);
@@ -80,7 +81,7 @@ function activeRequired() {
 
 function updateControls() {
   document.querySelectorAll('button, input, select, textarea').forEach(element => {
-    if (['help', 'close-help', 'theme-mode'].includes(element.id)) return;
+    if (['help', 'close-help', 'theme-mode'].includes(element.id) || element.closest('#fullscreen-preview')) return;
     element.disabled = busy;
   });
   $('undo').disabled = busy || !model.past.length;
@@ -91,6 +92,7 @@ function updateControls() {
   $('zoom-out').disabled = busy || !model.active || previewZoom <= minPreviewZoom;
   $('zoom-in').disabled = busy || !model.active || previewZoom >= maxPreviewZoom;
   $('zoom-fit').disabled = busy || !model.active;
+  $('open-fullscreen-preview').disabled = busy || !model.active;
   $('zoom-value').textContent = `${Math.round(previewZoom * 100)}%`;
   $('split').disabled = busy || !model.pages.length;
   $('split-count').textContent = `${model.pages.length}ページ`;
@@ -1159,7 +1161,15 @@ $('ink-canvas').addEventListener('pointercancel', event => {
 $('ink-canvas').addEventListener('lostpointercapture', finishStroke);
 $('help').addEventListener('click', () => $('help-dialog').showModal());
 $('close-help').addEventListener('click', () => $('help-dialog').close());
+createFullscreenPreview({ getPreview(index = model.pages.indexOf(model.active)) {
+  if (busy || !model.active || stroke || annotationDrag || pageDrag || !finishTextEdit()) return null;
+  const record = model.pages[index];
+  if (!record) return null;
+  return { record, source: sources.get(record.sourceId), pageIndex: index, pageCount: model.pages.length,
+    label: `${sources.get(record.sourceId).name} · ${index + 1} / ${model.pages.length}` };
+} });
 document.addEventListener('keydown', event => {
+  if ($('fullscreen-preview').open) return;
   if (event.key === 'Escape' && !event.repeat && !busy && !event.defaultPrevented && !event.isComposing && !$('help-dialog').open && !$('save-dialog').open) {
     event.preventDefault();
     cancelAnnotationDrag(); finishPageDrag();
