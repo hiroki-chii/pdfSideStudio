@@ -5,6 +5,7 @@ const manifest = JSON.parse(readFileSync(new URL('./public/manifest.json', impor
 
 export default defineConfig({
   base: './',
-  build: { target: 'chrome120', assetsInlineLimit: 0, chunkSizeWarningLimit: 1200 },
+  build: { target: 'chrome120', assetsInlineLimit: 0, chunkSizeWarningLimit: 1200,
+    rollupOptions: { input: { app: 'index.html', print: 'print.html' } } },
   preview: { headers: { 'Content-Security-Policy': manifest.content_security_policy.extension_pages } },
 });

@@ -1,0 +1,7 @@
+html,body{margin:0;padding:0;background:#eaeaea;color:#222;font:14px/1.5 sans-serif}
+header{position:sticky;top:0;display:flex;align-items:center;gap:16px;padding:12px 20px;background:white;border-bottom:1px solid #ddd}
+button{padding:8px 24px;border:0;border-radius:6px;background:#6553c7;color:white;font:inherit;cursor:pointer}
+button:disabled{opacity:.4;cursor:default}
+main img{display:block;margin:16px auto;background:white;box-shadow:0 2px 8px #0002}
+@page{margin:0}
+@media print{html,body{background:white}header{display:none}main img{margin:0;box-shadow:none;break-after:page;break-inside:avoid}main img:last-child{break-after:auto}}

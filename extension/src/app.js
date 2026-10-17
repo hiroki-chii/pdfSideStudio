@@ -7,6 +7,7 @@ import { zipSync } from 'fflate';
 import { EditorModel, safeFilename, MAX_FILE_BYTES, MAX_TOTAL_BYTES, MAX_PAGES, normalizeRotation } from './model.js';
 import { buildPdf, imagePlacement, paintOverlay, textLayout, moveText, strokeLayout, moveStroke, watermarkLayout, moveWatermark } from './pdf.js';
 import { createThemeController } from './theme.js';
+import { storePrintJob, deletePrintJob } from './print-job.js';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 const $ = id => document.getElementById(id);
@@ -90,6 +91,7 @@ function updateControls() {
   $('rotate-right').disabled = busy || !rotationCount;
   $('save').disabled = busy || !model.pages.length;
   $('open-save').disabled = busy || !model.pages.length;
+  $('print').disabled = busy || !model.pages.length;
   $('clear-ink').disabled = busy || !model.active?.strokes.some(item => item.tool !== 'text');
   if (!selectedAnnotation()) selectedAnnotationId = null;
   const visibleMenu = !previewMenuOpen ? null : selectedStroke() ? 'pen'
@@ -169,6 +171,7 @@ function refresh() {
   $('workspace').hidden = !hasPages && !model.past.length && !model.future.length;
   $('empty-state').hidden = hasPages;
   $('open-save').hidden = !hasPages;
+  $('document-actions').hidden = !hasPages;
   if (!hasPages && $('save-dialog').open) $('save-dialog').close();
   // Keep history controls available when deleting or undoing the last page.
   document.querySelector('.preview-section').hidden = !hasPages && !model.past.length && !model.future.length;
@@ -525,6 +528,37 @@ function download(bytes, name, type) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+async function printPdf() {
+  if (!model.pages.length) return;
+  const pages = [];
+  for (const [index, record] of model.pages.entries()) {
+    status('印刷を準備中… ' + (index + 1) + ' / ' + model.pages.length);
+    const source = sources.get(record.sourceId);
+    const page = await source.preview.getPage(record.index + 1);
+    const base = page.getViewport({ scale: 1, rotation: record.rotation });
+    const view = page.getViewport({ scale: Math.min(2, 4096 / Math.max(base.width, base.height)), rotation: record.rotation });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(view.width); canvas.height = Math.ceil(view.height);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport: view }).promise;
+    const overlay = document.createElement('canvas');
+    overlay.width = canvas.width; overlay.height = canvas.height;
+    paintOverlay(overlay.getContext('2d'), record, view);
+    canvas.getContext('2d').drawImage(overlay, 0, 0);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('印刷用の画像を作成できませんでした。');
+    pages.push({ blob, width: base.width, height: base.height });
+    canvas.width = canvas.height = overlay.width = overlay.height = 0;
+  }
+  const id = uid();
+  await storePrintJob(id, { title: safeFilename($('output-name').value), pages, createdAt: Date.now() });
+  try {
+    const url = new URL('print.html', document.baseURI); url.searchParams.set('job', id);
+    if (globalThis.chrome?.tabs?.create) await chrome.tabs.create({ url: url.href, active: true });
+    else if (!window.open(url.href, '_blank')) throw new Error('印刷タブを開けませんでした。ポップアップを許可して再度お試しください。');
+    status('印刷タブを開きました。ダイアログが開かない場合は、タブ内の「印刷」を押してください。', 'success');
+  } catch (error) { await deletePrintJob(id); throw error; }
+}
+
 async function exportPdf() {
   const records = model.pages;
   const bytes = await buildPdf(records, sources, createOverlay, (done, total) => status(`PDFを作成中… ${done} / ${total}`));
@@ -594,6 +628,7 @@ function openSaveDialog() {
 $('open-save').addEventListener('click', openSaveDialog);
 $('close-save').addEventListener('click', () => $('save-dialog').close());
 $('save-dialog').addEventListener('cancel', event => { if (busy) event.preventDefault(); });
+on('print', printPdf);
 on('save', async () => { await exportPdf(); $('save-dialog').close(); });
 on('split', async () => { await splitPdf(); $('save-dialog').close(); });
 on('clear-ink', () => {
