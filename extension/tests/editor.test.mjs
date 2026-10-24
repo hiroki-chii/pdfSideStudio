@@ -284,8 +284,11 @@ for (const rotation of [0, 90, 180, 270]) for (const userUnit of [1, 2]) {
         { tool: 'line', color: '#208040', width: 4, opacity: 0.6, points: [[40, 150], [175, 200]] },
         { tool: 'ellipse', color: '#8030c0', width: 5, opacity: 0.7, points: [[70, 110], [170, 210]] },
         { tool: 'rectangle', color: '#1680c0', width: 3, opacity: 0.5, points: [[60, 90], [160, 190]] },
-        { tool: 'text', id: 'text', text: 'Note\nPDF', fontSize: 12, rotation: 0, color: '#222222', points: [[60, 240]] },
-        { tool: 'text', id: 'rotated-text', text: 'At 90', fontSize: 10, rotation: 90, color: '#108030', points: [[110, 160]] }],
+        { tool: 'text', id: 'text', text: 'Note\nPDF', fontSize: 12, fontFamily: 'serif', bold: true, italic: true,
+          underline: true, textAlign: 'center', rotation: 0, color: '#222222', points: [[60, 240]],
+          runs: [{ start: 1, end: 3, style: { fontSize: 20, bold: false, color: '#c02040' } }] },
+        { tool: 'text', id: 'rotated-text', text: 'At 90\nPDF', fontSize: 10, fontFamily: 'monospace',
+          textAlign: 'right', rotation: 90, color: '#108030', points: [[110, 160]] }],
       watermark: { text: 'DRAFT', color: '#7060aa', opacity: 0.35 } };
     const pdfPage = await preview.getPage(1);
     const viewport = pdfPage.getViewport({ scale: 1, rotation });

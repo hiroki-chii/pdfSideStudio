@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
 const dismissalScript = app.slice(app.indexOf("document.addEventListener('pointerdown', event => {"),
-  app.indexOf('\nfunction previewTextFormatting()'));
+  app.indexOf('\nfunction textFormatRange()'));
 const drawingScript = app.slice(app.indexOf("$('ink-canvas').addEventListener('pointerdown', event => {"),
   app.indexOf("\n$('help').addEventListener"));
 
@@ -25,7 +25,7 @@ function setup(tool) {
   const context = vm.createContext({ $, document: {
     addEventListener(type, handler, capture) { documentHandlers[type] = { handler, capture }; },
   }, previewMenuOpen: true, penEnabled: tool === 'pen', textEnabled: tool === 'text',
-  busy: false, stroke: null, annotationDrag: null, selectedAnnotationId: null,
+  busy: false, stroke: null, annotationDrag: null, pageDrag: null, selectedAnnotationId: null,
   activePreviewMenu: tool, textEdit: null, viewport: {},
   model: { activeId: 'page', active: { rotation: 0, strokes: [] },
     update() { calls.push('save-stroke'); } },
@@ -44,6 +44,7 @@ function setup(tool) {
   function pointerdown({ target = 'canvas', ...overrides } = {}) {
     const event = { button: 0, isPrimary: true, pointerId: 1, clientX: 20, clientY: 30,
       target: { closest(selector) {
+        if (selector.startsWith('.canvas-stack,') && ['canvas', 'handle', 'editor', 'settings', 'button', 'dialog', 'label'].includes(target)) return {};
         if (selector === '#preview-scroll' && ['canvas', 'handle', 'blank', 'editor'].includes(target)) return {};
         if (selector === '.text-editor' && target === 'editor') return {};
         if (selector === '.text-settings' && target === 'settings') return {};
@@ -58,6 +59,65 @@ function setup(tool) {
   }
   return { context, $, calls, pointerdown };
 }
+
+function selectedSetup(tool) {
+  const env = setup(tool);
+  const { context, calls } = env;
+  context.selectedAnnotationId = 'annotation';
+  context.resetPreviewMenu = () => { context.activePreviewMenu = 'select'; };
+  context.finishTextEdit = () => {
+    if (context.textEdit) {
+      calls.push('commit-text');
+      if (context.invalidText) return false;
+      context.textEdit = null;
+    }
+    return true;
+  };
+  vm.runInContext(app.slice(app.indexOf('function enableSelection('), app.indexOf('\nfunction togglePreviewMenu(')), context);
+  return env;
+}
+
+for (const tool of ['text', 'pen']) {
+  test(`${tool}: outside-paper blank clicks clear selection and close settings in one gesture`, () => {
+    for (const target of ['blank', 'outside']) for (const menuOpen of [false, true]) {
+      const { context, pointerdown } = selectedSetup(tool);
+      context.previewMenuOpen = menuOpen;
+      const event = pointerdown({ target });
+      assert.equal(context.selectedAnnotationId, null);
+      assert.equal(context.previewMenuOpen, false);
+      assert.equal(context.activePreviewMenu, 'select');
+      assert.equal(event.stopped, undefined);
+    }
+  });
+}
+
+test('outside blank clicks commit active text before deselecting, but preserve invalid text', () => {
+  for (const invalidText of [false, true]) {
+    const { context, calls, pointerdown } = selectedSetup('text');
+    const editor = {};
+    context.textEdit = { editor }; context.invalidText = invalidText;
+    const event = pointerdown({ target: 'outside' });
+    assert.deepEqual(calls, ['format', 'commit-text']);
+    assert.equal(context.selectedAnnotationId, invalidText ? 'annotation' : null);
+    assert.equal(!!context.textEdit, invalidText);
+    assert.equal(event.stopped, invalidText ? true : undefined);
+  }
+});
+
+test('settings, controls, object clicks and non-editing gestures do not clear selection', () => {
+  for (const options of [{ target: 'settings' }, { target: 'button' }, { target: 'dialog' }, { target: 'label' },
+    { target: 'handle' }, { target: 'editor' }, { target: 'outside', button: 2 }, { target: 'outside', isPrimary: false }]) {
+    const { context, pointerdown } = selectedSetup('text');
+    pointerdown(options);
+    assert.equal(context.selectedAnnotationId, 'annotation');
+  }
+  for (const guard of ['busy', 'stroke', 'annotationDrag', 'pageDrag']) {
+    const { context, pointerdown } = selectedSetup('pen');
+    context[guard] = true;
+    pointerdown({ target: 'outside' });
+    assert.equal(context.selectedAnnotationId, 'annotation');
+  }
+});
 
 for (const tool of ['pen', 'text']) {
   test(`${tool}: first preview gesture only closes the menu; next gesture edits`, () => {

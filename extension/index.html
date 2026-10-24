@@ -86,10 +86,15 @@
             <section id="panel-text" class="preview-menu" aria-labelledby="text-menu-title" hidden>
               <div class="preview-menu-heading"><h2 id="text-menu-title">テキストを配置</h2><button id="close-text" type="button">配置を終了</button></div>
               <p id="text-mode-hint" class="tool-hint">紙面を1回クリックして入力します。</p>
-              <div class="text-settings"><label>色 <input id="text-color" type="color" value="#222222" /></label><label>文字サイズ <input id="text-size" type="number" min="8" max="96" value="24" /> pt</label></div>
-              <div id="text-selection-actions" class="action-grid text-actions" hidden><button id="update-text">内容を編集</button><button id="delete-text" class="danger">選択テキストを削除</button></div>
+              <div class="text-settings">
+                <label class="text-font-field">フォント <select id="text-font"><option value="sans-serif">ゴシック</option><option value="serif">明朝</option><option value="monospace">等幅</option></select></label>
+                <div class="text-format-row"><label>色 <input id="text-color" type="color" value="#222222" /></label><label>文字サイズ <input id="text-size" type="number" min="8" max="96" value="24" /> pt</label></div>
+                <div class="text-format-row"><div class="text-style-buttons" role="group" aria-label="文字の装飾"><button id="text-bold" type="button" aria-pressed="false" aria-keyshortcuts="Control+b" title="太字（Ctrl+B）"><b>太字</b></button><button id="text-italic" type="button" aria-pressed="false" aria-keyshortcuts="Control+i" title="斜体（Ctrl+I）"><i>斜体</i></button><button id="text-underline" type="button" aria-pressed="false" aria-keyshortcuts="Control+u" title="下線（Ctrl+U）"><u>下線</u></button></div><label>配置 <select id="text-align"><option value="left">左揃え</option><option value="center">中央揃え</option><option value="right">右揃え</option></select></label></div>
+              </div>
+              <div id="text-selection-actions" class="action-grid text-actions" hidden><button id="update-text" aria-keyshortcuts="F2" title="内容を編集（F2）">内容を編集</button><button id="delete-text" class="danger">選択テキストを削除</button></div>
               <div id="text-edit-actions" class="action-grid text-actions" hidden><button id="confirm-text" class="accent-button" type="button">入力を確定</button><button id="cancel-text" type="button">入力を取り消す</button></div>
-              <p id="text-edit-hint" class="subtle">外側クリック・Ctrl+Enterで確定。新規入力中のEscは確定、再編集中のEscは変更を取り消します。配置後は選択モードに戻ります。続けて追加するには上の「テキスト」を押します。</p>
+              <p id="text-edit-hint" class="subtle">外側クリック・Ctrl+Enter・Escで入力を確定。「入力を取り消す」で変更を取り消します。確定後はドラッグ・方向キーで移動できます。</p>
+              <p class="subtle">F2: 編集開始 · Ctrl+B/I/U: 太字／斜体／下線 · Ctrl+↑/↓: 1ptずつ拡大／縮小。編集中は文字を選択して適用、選択モードではボックス全体に適用します。</p>
             </section>
             </div>
             <button id="previous" class="preview-nav preview-nav-previous" aria-label="前のページ" title="前のページ（←キー）" aria-keyshortcuts="ArrowLeft"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m14 6-6 6 6 6"/></svg></button>

@@ -5,10 +5,12 @@ import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import { PDFDocument } from 'pdf-lib';
 import { zipSync } from 'fflate';
 import { EditorModel, safeFilename, MAX_FILE_BYTES, MAX_TOTAL_BYTES, MAX_PAGES, normalizeRotation } from './model.js';
-import { buildPdf, imagePlacement, paintOverlay, textLayout, moveText, strokeLayout, moveStroke, watermarkLayout, moveWatermark } from './pdf.js';
+import { buildPdf, imagePlacement, paintOverlay, textFontFamily, textLayout, moveText, strokeLayout, moveStroke, watermarkLayout, moveWatermark } from './pdf.js';
 import { createThemeController } from './theme.js';
 import { storePrintJob, deletePrintJob } from './print-job.js';
 import { createFullscreenPreview } from './fullscreen-preview.js';
+import { styledRuns, textStyle, formatText, replaceText } from './text-format.js';
+import { createTextEditor } from './text-editor.js';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 const $ = id => document.getElementById(id);
@@ -104,11 +106,12 @@ function updateControls() {
   $('print').disabled = busy || !model.pages.length;
   $('clear-ink').disabled = busy || !model.active?.strokes.some(item => item.tool !== 'text');
   if (!selectedAnnotation()) selectedAnnotationId = null;
+  const textSelected = !!(selectedText() || textEdit);
   const visibleMenu = !previewMenuOpen ? null : selectedStroke() ? 'pen'
     : textEnabled || selectedText() || textEdit ? 'text'
       : selectedAnnotation()?.tool === 'watermark' ? 'watermark' : activePreviewMenu;
   $('open-select').disabled = busy || !model.active;
-  $('open-select').setAttribute('aria-pressed', String(activePreviewMenu === 'select'));
+  $('open-select').setAttribute('aria-pressed', String(!textSelected && activePreviewMenu === 'select'));
   $('open-select').setAttribute('aria-controls', 'panel-select');
   $('open-select').setAttribute('aria-expanded', String(visibleMenu === 'select' && !!model.active));
   $('panel-select').hidden = !model.active || visibleMenu !== 'select';
@@ -124,19 +127,21 @@ function updateControls() {
     ? '選択した描画だけを移動・削除できます。'
     : '紙面をドラッグして描きます。終了するには「描画を終了」かEsc。';
   $('text-menu-title').textContent = textEdit ? 'テキストを入力中' : selectedText() ? '選択したテキスト' : 'テキストを配置';
-  $('text-mode-hint').textContent = textEdit ? '色・サイズは入力中の文字に反映されます。'
-    : selectedText() ? '色・サイズは選択した文字にすぐ反映されます。ドラッグで移動できます。'
-      : '紙面を1回クリックして入力します。色・サイズは新しい文字に適用されます。';
+  $('text-mode-hint').textContent = textEdit ? '文字の書式は選択範囲に、配置は選択した行に反映されます。'
+    : selectedText() ? '書式は選択したテキスト全体にすぐ反映されます。ドラッグで移動できます。'
+      : '紙面を1回クリックして入力します。書式は新しいテキスト全体に適用されます。';
   $('close-text').textContent = textEdit ? '確定して終了' : selectedText() ? '選択を解除' : '配置を終了';
   $('text-selection-actions').hidden = !selectedText() || !!textEdit;
   $('text-edit-actions').hidden = !textEdit;
   $('text-edit-hint').textContent = selectedText() && !textEdit
-    ? '方向キーで1pt、Shift＋方向キーで10pt移動。Deleteで削除。ダブルクリックまたは「内容を編集」で再編集できます。続けて追加するには上の「テキスト」を押します。'
-    : '外側クリック・Ctrl+Enterで確定。新規入力中のEscは確定、再編集中のEscは変更を取り消します。配置後は選択モードに戻ります。続けて追加するには上の「テキスト」を押します。';
+    ? 'クリックまたは「内容を編集」で再編集。ドラッグ・方向キーで移動、Deleteで削除。Escまたは紙面の空白をクリックして選択を解除すると、ほかのツールを使えます。'
+    : '外側クリック・Ctrl+Enter・Escで入力を確定。「入力を取り消す」で変更を取り消します。書式は上の「テキスト」アイコンから設定できます。';
   $('open-text').hidden = !model.pages.length;
   $('open-text').disabled = busy || !model.active;
-  $('open-text').setAttribute('aria-pressed', String(activePreviewMenu === 'text'));
+  $('open-text').setAttribute('aria-pressed', String(textSelected || activePreviewMenu === 'text'));
   $('open-text').setAttribute('aria-expanded', String(!$('panel-text').hidden));
+  $('open-text').setAttribute('aria-label', textSelected ? 'テキストの書式設定' : 'テキストボックスを配置');
+  $('open-text').title = textSelected ? '選択したテキストの書式設定を開く・閉じる' : toolDescriptions['open-text'];
   $('ink-canvas').classList.toggle('inserting-text', textEnabled && !busy);
   const watermarkPages = $('watermark-scope').value === 'all' ? model.pages : model.active ? [model.active] : [];
   const watermarkCount = watermarkPages.filter(page => page.watermark).length;
@@ -162,6 +167,9 @@ function updateControls() {
     $(`open-${name}`).disabled = busy || !model.pages.length;
     $(`open-${name}`).setAttribute('aria-expanded', String(open));
     $(`open-${name}`).setAttribute('aria-pressed', String(activePreviewMenu === name));
+  }
+  for (const name of ['select', ...previewMenus]) {
+    $(`open-${name}`).disabled ||= textSelected;
   }
   const selected = selectedAnnotation();
   $('watermark-menu-title').textContent = selected?.tool === 'watermark' ? '選択した透かし' : '透かしの設定';
@@ -729,6 +737,7 @@ function enableSelection(showMenu = false) {
 }
 function togglePreviewMenu(name) {
   if (busy || stroke || annotationDrag || pageDrag || !model.active) return;
+  if (name !== 'text' && (selectedText() || textEdit)) return;
   if (previewMenuOpen && !$(`panel-${name}`).hidden) {
     previewMenuOpen = false; updateControls(); return;
   }
@@ -801,6 +810,12 @@ function selectAnnotation(annotation) {
   if (annotation.tool === 'text') {
     $('text-color').value = annotation.color;
     $('text-size').value = annotation.fontSize;
+    $('text-font').value = annotation.fontFamily || 'sans-serif';
+    $('text-align').value = annotation.textAlign || 'left';
+    for (const style of ['bold', 'italic', 'underline']) {
+      $(`text-${style}`).setAttribute('aria-pressed', String(!!annotation[style]));
+    }
+    syncTextFormatControls();
   } else { textEnabled = false; }
   $('text-handles').querySelectorAll('button').forEach(button => {
     const selected = button.dataset.annotationId === selectedAnnotationId;
@@ -811,7 +826,12 @@ function selectAnnotation(annotation) {
 function textSettings() {
   const fontSize = Number($('text-size').value);
   if (!Number.isFinite(fontSize) || fontSize < 8 || fontSize > 96) throw new Error('文字サイズは8〜96ptで指定してください。');
-  return { fontSize, color: $('text-color').value };
+  // Undefined defaults preserve annotations made before formatting was added.
+  return { fontSize, color: $('text-color').value,
+    fontFamily: $('text-font').value === 'sans-serif' ? undefined : $('text-font').value,
+    textAlign: $('text-align').value === 'left' ? undefined : $('text-align').value,
+    ...Object.fromEntries(['bold', 'italic', 'underline'].map(style =>
+      [style, $(`text-${style}`).getAttribute('aria-pressed') === 'true' || undefined])) };
 }
 function fitText(annotation) {
   const ctx = $('ink-canvas').getContext('2d');
@@ -823,7 +843,9 @@ function fitText(annotation) {
 }
 function enableTextInsertion() {
   if (busy || stroke || annotationDrag || pageDrag || !model.active) return;
-  if (textEnabled || textEdit) { previewMenuOpen = true; updateControls(); return; }
+  if (textEnabled || textEdit || selectedText()) {
+    previewMenuOpen = true; activePreviewMenu = 'text'; updateControls(); return;
+  }
   if (!finishTextEdit()) return;
   previewMenuOpen = true;
   textEnabled = true; penEnabled = false; selectedAnnotationId = null;
@@ -863,16 +885,20 @@ function positionTextEditor() {
   const scale = $('ink-canvas').getBoundingClientRect().width / viewport.width;
   // Match the PDF font and explicit line breaks; never introduce browser wrapping.
   Object.assign(editor.style, { left: `${layout.x * scale}px`, top: `${layout.y * scale}px`,
-    width: `${Math.max(layout.width * scale + 2, draft.text ? 0 : 60)}px`,
+    width: `${Math.max(layout.contentWidth * scale + 2, draft.text ? 0 : 60)}px`,
+    paddingLeft: `${layout.insetLeft * scale}px`, paddingRight: `${layout.insetRight * scale}px`,
     height: `${layout.height * scale + 2}px`, fontSize: `${layout.size * scale}px`,
-    lineHeight: `${layout.size * scale * 1.3}px`, color: draft.color,
+    lineHeight: '1.3', color: draft.color, caretColor: draft.color,
+    fontFamily: textFontFamily(draft.fontFamily), fontWeight: draft.bold ? '700' : '400',
+    fontStyle: draft.italic ? 'italic' : 'normal', textDecoration: draft.underline ? 'underline' : 'none',
+    textAlign: draft.textAlign || 'left',
     transform: `rotate(${layout.angle}rad)` });
 }
 
 function updateTextDraft() {
   if (!textEdit || !viewport) return false;
   try {
-    const draft = fitText({ ...textEdit.draft, ...textSettings(), text: textEdit.editor.value.replaceAll('\r\n', '\n') });
+    const draft = fitText(readTextDraft());
     textEdit.draft = draft;
     textEdit.editor.setCustomValidity('');
     positionTextEditor();
@@ -884,30 +910,41 @@ function updateTextDraft() {
   }
 }
 
+function readTextDraft() {
+  const contents = textEdit.editor.getAnnotation?.()
+    || replaceText(textEdit.draft, textEdit.editor.value.replaceAll('\r\n', '\n'));
+  if (contents.text.length > 500) throw new Error('テキストは500文字以内で入力してください。');
+  return { ...contents, points: textEdit.draft.points };
+}
+
 function startTextEdit(annotation, isNew = false) {
   if (!viewport || !finishTextEdit()) return;
+  previewMenuOpen = false;
   selectAnnotation(annotation); penEnabled = false;
   if (isNew) activePreviewMenu = 'text';
-  const editor = document.createElement('textarea');
+  const editor = createTextEditor(annotation);
   editor.className = 'text-editor'; editor.value = annotation.text;
-  editor.maxLength = 500; editor.wrap = 'off'; editor.spellcheck = false;
-  editor.placeholder = 'テキスト'; editor.setAttribute('aria-label', 'テキストボックス');
+  editor.spellcheck = false;
+  editor.setAttribute('aria-label', 'テキストボックス');
   editor.setAttribute('aria-describedby', 'text-edit-hint');
+  editor.setAttribute('aria-keyshortcuts', 'F2 Control+b Control+i Control+u Control+ArrowUp Control+ArrowDown Escape');
   textEdit = { pageId: model.activeId, original: isNew ? null : annotation, draft: annotation, editor };
+  editor.onTextSelectionChange = syncTextFormatControls;
   editor.addEventListener('input', updateTextDraft);
   editor.addEventListener('keydown', event => {
     if (event.isComposing || event.keyCode === 229) return;
+    if (handleTextShortcut(event)) return;
     if (event.key === 'Escape') {
       event.preventDefault(); event.stopPropagation();
-      // Keep newly entered text and focus its selection frame for keyboard actions.
-      if (finishTextEdit(!isNew)) {
+      // Preserve edits and focus the selection frame for moving the text.
+      if (finishTextEdit()) {
         focusSelectedAnnotation();
       }
     } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault(); event.stopPropagation();
       if (finishTextEdit()) focusSelectedAnnotation();
     } else if (event.key === 'Tab') {
-      event.preventDefault(); if (finishTextEdit()) $('text-color').focus({ preventScroll: true });
+      event.preventDefault(); if (finishTextEdit()) $('open-text').focus({ preventScroll: true });
     } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault(); event.stopPropagation(); openSaveDialog();
     }
@@ -922,7 +959,7 @@ function finishTextEdit(cancel = false) {
   if (!cancel && !updateTextDraft()) { textEdit.editor.focus({ preventScroll: true }); return false; }
   const { pageId, original, draft, editor } = textEdit;
   textEdit = null; editor.remove();
-  textEnabled = false; resetPreviewMenu();
+  textEnabled = false; previewMenuOpen = false; resetPreviewMenu();
   if (!cancel) {
     const empty = !draft.text.trim();
     const changed = original ? JSON.stringify(original) !== JSON.stringify(draft) || empty : !empty;
@@ -931,7 +968,7 @@ function finishTextEdit(cancel = false) {
         ? p.strokes.flatMap(item => item.id === original.id ? (empty ? [] : [draft]) : [item])
         : [...p.strokes, draft] }));
       refreshThumbnails();
-      status(empty ? 'テキストを削除しました。' : 'テキストを確定しました。ドラッグで移動、ダブルクリックで再編集できます。', 'success');
+      status(empty ? 'テキストを削除しました。' : 'テキストを確定しました。クリックで再編集、テキストアイコンで書式を変更できます。', 'success');
     }
     selectedAnnotationId = empty ? null : draft.id;
   } else selectedAnnotationId = original?.id ?? null;
@@ -941,6 +978,16 @@ function finishTextEdit(cancel = false) {
 
 // Commit before toolbar/page/export actions so they always see the latest text.
 document.addEventListener('pointerdown', event => {
+  // Blank space outside the paper also clears selection, while controls remain usable.
+  if (event.button === 0 && event.isPrimary && !busy && !stroke && !annotationDrag && !pageDrag
+    && (selectedAnnotationId || textEdit)
+    && !event.target.closest('.canvas-stack, .preview-menu, button, input, select, textarea, a, label, summary, dialog, [contenteditable]')) {
+    finishTextFormatting();
+    enableSelection();
+    // Invalid text must stay editable instead of losing focus on an outside click.
+    if (textEdit) { event.preventDefault(); event.stopImmediatePropagation(); }
+    return;
+  }
   // Dismiss tool settings before the preview can start an editing gesture.
   if (previewMenuOpen && (!$('panel-pen').hidden || !$('panel-text').hidden)
     && event.target.closest('#preview-scroll') && !event.target.closest('.text-editor')
@@ -952,20 +999,51 @@ document.addEventListener('pointerdown', event => {
   }
   if (!event.target.closest('.text-settings')) finishTextFormatting();
   if (event.target.closest('#confirm-text, #cancel-text, #close-text, #previous, #next, .preview-tool-button, .preview-zoom')) return;
-  if (!textEdit || event.target === textEdit.editor || event.target.closest('.text-settings')) return;
+  if (!textEdit || event.target === textEdit.editor || textEdit.editor.contains?.(event.target) || event.target.closest('.text-settings')) return;
   if (!finishTextEdit()) { event.preventDefault(); event.stopImmediatePropagation(); }
 }, true);
 // Dismiss menus on other outside clicks after the target handles its action.
 document.addEventListener('click', event => {
-  if (!previewMenuOpen || event.target.closest('.preview-menu, .preview-tool-button')) return;
+  if (!previewMenuOpen || event.target.closest('.preview-menu, .preview-tool-button, .text-handle')) return;
   previewMenuOpen = false;
   updateControls();
 });
-function previewTextFormatting() {
-  if (textEdit) { updateTextDraft(); return; }
+function textFormatRange() {
+  if (!textEdit) return { start: 0, end: selectedText()?.text.length || 0 };
+  return { start: textEdit.editor.selectionStart || 0, end: textEdit.editor.selectionEnd || 0 };
+}
+function syncTextFormatControls() {
+  const annotation = textEdit ? textEdit.editor.getAnnotation?.() || textEdit.draft : selectedText();
+  if (!annotation) return;
+  const { start, end } = textFormatRange();
+  const runs = styledRuns(annotation).filter(run => end > start
+    ? run.start < end && run.end > start : run.start <= start && run.end >= start);
+  const style = runs[0]?.style || textStyle(annotation);
+  $('text-size').value = style.fontSize; $('text-color').value = style.color;
+  $('text-font').value = style.fontFamily; $('text-align').value = style.textAlign;
+  for (const key of ['bold', 'italic', 'underline']) {
+    const mixed = runs.some(run => run.style[key] !== style[key]);
+    $(`text-${key}`).setAttribute('aria-pressed', mixed ? 'mixed' : String(style[key]));
+  }
+}
+function previewTextFormatting(patch = textSettings()) {
+  if (textEdit) {
+    const { start, end } = textFormatRange();
+    if (start === end) { status('書式を変更する文字を選択してください。'); syncTextFormatControls(); return; }
+    try {
+      const draft = fitText(formatText(readTextDraft(), start, end, patch));
+      textEdit.draft = draft;
+      textEdit.editor.setCustomValidity('');
+      if (textEdit.editor.setAnnotation) textEdit.editor.setAnnotation(draft);
+      else textEdit.editor.value = draft.text;
+      positionTextEditor(); syncTextFormatControls();
+    } catch (error) { status(error.message, 'error'); syncTextFormatControls(); }
+    return;
+  }
   if (!selectedText() || !viewport || busy) return;
   try {
-    textFormatPreview = fitText({ ...selectedText(), ...textSettings() });
+    const original = textFormatPreview || selectedText();
+    textFormatPreview = fitText(formatText(original, 0, original.text.length, patch, true));
     paintTextPreview(); refreshAnnotationHandles();
   } catch (error) {
     textFormatPreview = null;
@@ -980,12 +1058,59 @@ function finishTextFormatting() {
   if (!original || annotation.id !== original.id || JSON.stringify(annotation) === JSON.stringify(original)) return;
   model.update(new Set([model.activeId]), p => ({ ...p,
     strokes: p.strokes.map(item => item.id === annotation.id ? annotation : item) }));
-  refreshThumbnails(); updateControls();
+  refreshThumbnails(); updateControls(); syncTextFormatControls();
 }
-for (const id of ['text-color', 'text-size']) {
-  $(id).addEventListener('input', previewTextFormatting);
-  $(id).addEventListener('change', () => { previewTextFormatting(); finishTextFormatting(); });
+for (const id of ['text-color', 'text-size', 'text-font', 'text-align']) {
+  const property = { 'text-color': 'color', 'text-size': 'fontSize', 'text-font': 'fontFamily', 'text-align': 'textAlign' }[id];
+  const preview = () => {
+    const value = id === 'text-size' ? Number($(id).value) : $(id).value;
+    if (id === 'text-size' && (!Number.isFinite(value) || value < 8 || value > 96)) {
+      status('文字サイズは8〜96ptで指定してください。', 'error'); return;
+    }
+    previewTextFormatting({ [property]: value });
+  };
+  $(id).addEventListener('input', preview);
+  $(id).addEventListener('change', () => { preview(); finishTextFormatting(); });
   $(id).addEventListener('blur', finishTextFormatting);
+}
+for (const style of ['bold', 'italic', 'underline']) {
+  const button = $(`text-${style}`);
+  button.addEventListener('click', () => {
+    toggleTextStyle(style);
+  });
+}
+function toggleTextStyle(style) {
+  const annotation = textEdit?.draft || selectedText();
+  if (!annotation) {
+    const button = $(`text-${style}`);
+    button.setAttribute('aria-pressed', String(button.getAttribute('aria-pressed') !== 'true'));
+    return;
+  }
+  const current = textEdit?.editor.getAnnotation?.() || textEdit?.draft || annotation, { start, end } = textFormatRange();
+  const runs = styledRuns(current).filter(run => run.start < end && run.end > start);
+  const value = !runs.length || !runs.every(run => run.style[style]);
+  previewTextFormatting({ [style]: value }); finishTextFormatting();
+}
+function handleTextShortcut(event) {
+  if (busy || stroke || annotationDrag || pageDrag || !viewport || event.defaultPrevented
+    || event.isComposing || event.keyCode === 229 || event.altKey
+    || $('help-dialog').open || $('save-dialog').open || $('fullscreen-preview').open) return false;
+  if (!selectedText() && !textEdit) return false;
+  const editable = event.target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])');
+  if (editable && (!textEdit || (editable !== textEdit.editor && !textEdit.editor.contains?.(editable)))) return false;
+  if (event.key === 'F2' && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+    event.preventDefault(); event.stopPropagation();
+    if (textEdit) textEdit.editor.focus({ preventScroll: true }); else startTextEdit(selectedText());
+    return true;
+  }
+  if ((!event.ctrlKey && !event.metaKey) || event.shiftKey) return false;
+  const style = { b: 'bold', i: 'italic', u: 'underline' }[event.key.toLowerCase()];
+  const step = event.key === 'ArrowUp' ? 1 : event.key === 'ArrowDown' ? -1 : 0;
+  if (!style && !step) return false;
+  event.preventDefault(); event.stopPropagation();
+  if (style) { if (!event.repeat) toggleTextStyle(style); }
+  else { previewTextFormatting(current => ({ fontSize: Math.max(8, Math.min(96, current.fontSize + step)) })); finishTextFormatting(); }
+  return true;
 }
 function deleteSelectedAnnotation() {
   const annotation = selectedAnnotation();
@@ -1030,9 +1155,9 @@ function refreshAnnotationHandles() {
     if (isText) button.dataset.textId = annotation.id;
     button.setAttribute('aria-label', isText ? `テキストを移動: ${annotation.text}` : annotation.tool === 'watermark' ? `透かしを選択・移動: ${annotation.text}` : '描画を選択・移動');
     button.setAttribute('aria-pressed', String(annotation.id === selectedAnnotationId));
-    button.title = 'クリックで選択して書式変更。方向キーで1pt、Shift＋方向キーで10pt移動。Deleteで削除。ドラッグで移動、ダブルクリックまたはEnterで編集。';
+    button.title = 'クリックまたはF2で内容を編集。Ctrl+B/I/Uで太字・斜体・下線、Ctrl+↑/↓でサイズ変更。ドラッグ・方向キーで移動、Deleteで削除。';
     if (!isText) button.title = 'クリックで選択。ドラッグで移動。方向キーで1pt、Shift＋方向キーで10pt移動。Deleteで削除。';
-    button.setAttribute('aria-keyshortcuts', 'Delete ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown');
+    button.setAttribute('aria-keyshortcuts', `${isText ? 'F2 Control+b Control+i Control+u Control+ArrowUp Control+ArrowDown ' : ''}Delete ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown`);
     positionAnnotationHandle(button, annotation.id === textFormatPreview?.id ? textFormatPreview : annotation);
     if (existing) continue;
     const currentText = () => pageAnnotations().find(item => item.id === button.dataset.annotationId);
@@ -1047,7 +1172,9 @@ function refreshAnnotationHandles() {
       if (busy || stroke || annotationDrag || !viewport || event.button !== 0 || !event.isPrimary) return;
       const annotation = currentText();
       if (!annotation) return;
-      event.preventDefault(); selectAnnotation(annotation); button.focus({ preventScroll: true });
+      event.preventDefault();
+      if (isText) previewMenuOpen = false;
+      selectAnnotation(annotation); button.focus({ preventScroll: true });
       button.setPointerCapture(event.pointerId);
       annotationDrag = { pageId: model.activeId, pointerId: event.pointerId, original: annotation, current: annotation,
         start: canvasPoint(event), button };
@@ -1081,7 +1208,7 @@ function updateAnnotationDrag(event) {
 function finishAnnotationDrag(event) {
   if (!annotationDrag || event.pointerId !== annotationDrag.pointerId) return;
   updateAnnotationDrag(event);
-  const { pageId, original, current, button, pointerId } = annotationDrag; annotationDrag = null;
+  const { pageId, original, current, button, pointerId, moved } = annotationDrag; annotationDrag = null;
   if (button.hasPointerCapture(pointerId)) button.releasePointerCapture(pointerId);
   const [x, y] = original.points[0]; const [nextX, nextY] = current.points[0];
   if (Math.hypot(nextX - x, nextY - y) > 0.01) {
@@ -1091,6 +1218,8 @@ function finishAnnotationDrag(event) {
   }
   // Preserve the DOM target for the browser's second click/dblclick event.
   positionAnnotationHandle(button, current); updateControls();
+  // Clicking edits the content; formatting opens only from the text toolbar icon.
+  if (!moved && original.tool === 'text') startTextEdit(current);
 }
 function cancelAnnotationDrag() {
   if (!annotationDrag) return;
@@ -1170,6 +1299,7 @@ createFullscreenPreview({ getPreview(index = model.pages.indexOf(model.active)) 
 } });
 document.addEventListener('keydown', event => {
   if ($('fullscreen-preview').open) return;
+  if (handleTextShortcut(event)) return;
   if (event.key === 'Escape' && !event.repeat && !busy && !event.defaultPrevented && !event.isComposing && !$('help-dialog').open && !$('save-dialog').open) {
     event.preventDefault();
     cancelAnnotationDrag(); finishPageDrag();

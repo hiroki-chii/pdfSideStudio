@@ -1,5 +1,6 @@
 import { PDFDocument, degrees } from 'pdf-lib';
 import { normalizeRotation } from './model.js';
+import { styledRuns, textStyle } from './text-format.js';
 
 export function imagePlacement(viewport) {
   const [x, y] = viewport.convertToPdfPoint(0, viewport.height);
@@ -60,20 +61,60 @@ export function paintOverlay(ctx, record, viewport) {
   }
 }
 
-const textFont = size => `400 ${size}px "Noto Sans JP", "Yu Gothic", "Meiryo", sans-serif`;
+const textFonts = {
+  'sans-serif': '"Noto Sans JP", "Yu Gothic", "Meiryo", sans-serif',
+  serif: '"Noto Serif JP", "Yu Mincho", "MS PMincho", serif',
+  monospace: '"BIZ UDGothic", "MS Gothic", monospace',
+};
+export const textFontFamily = family => textFonts[family] || textFonts['sans-serif'];
+export const textFont = (size, annotation = {}) => `${annotation.italic ? 'italic ' : ''}${annotation.bold ? 700 : 400} ${size}px ${textFontFamily(annotation.fontFamily)}`;
 
 export function textLayout(ctx, annotation, viewport) {
   const [x, y] = viewport.convertToViewportPoint(...annotation.points[0]);
   const size = annotation.fontSize * viewport.scale;
-  const lines = annotation.text.split('\n');
-  ctx.save(); ctx.font = textFont(size);
-  const width = Math.max(size * 0.2, ...lines.map(line => ctx.measureText(line).width));
+  const lines = annotation.text.split('\n'), lineRuns = [[]];
+  for (const run of styledRuns(annotation)) {
+    run.text.split('\n').forEach((text, index) => {
+      if (index) lineRuns.push([]);
+      if (text) lineRuns.at(-1).push({ text, style: run.style });
+    });
+  }
+  ctx.save();
+  const metrics = [], lineSizes = [], lineStyles = [];
+  for (const runs of lineRuns) {
+    let width = 0, left = 0, right = 0;
+    const maxSize = runs.length ? Math.max(...runs.map(run => run.style.fontSize * viewport.scale)) : size;
+    for (const run of runs) {
+      run.size = run.style.fontSize * viewport.scale;
+      ctx.font = textFont(run.size, run.style);
+      const measured = ctx.measureText(run.text);
+      run.x = width; run.width = measured.width;
+      run.y = maxSize - run.size;
+      left = Math.max(left, (measured.actualBoundingBoxLeft || 0) - width);
+      right = Math.max(right, width + (measured.actualBoundingBoxRight || 0));
+      width += measured.width;
+    }
+    metrics.push({ width, actualBoundingBoxLeft: left, actualBoundingBoxRight: right });
+    lineSizes.push(maxSize); lineStyles.push(runs[0]?.style || textStyle(annotation));
+  }
+  const lineWidths = metrics.map(metric => metric.width);
+  const contentWidth = Math.max(size * 0.2, ...lineWidths);
+  // Include glyph overhang (especially italics) in selection and page-edge checks.
+  const insetLeft = Math.max(0, ...metrics.map(metric => metric.actualBoundingBoxLeft || 0));
+  const insetRight = Math.max(0, ...metrics.map(metric => (metric.actualBoundingBoxRight || 0) - metric.width));
+  const width = contentWidth + insetLeft + insetRight;
+  const lineOffsets = lineWidths.map((lineWidth, index) => insetLeft + (contentWidth - lineWidth)
+    * (lineStyles[index].textAlign === 'center' ? 0.5 : lineStyles[index].textAlign === 'right' ? 1 : 0));
   ctx.restore();
-  const height = lines.length * size * 1.3;
+  let height = 0;
+  lineRuns.forEach((runs, index) => {
+    runs.forEach(run => { run.x += lineOffsets[index]; run.y += height; });
+    height += lineSizes[index] * 1.3;
+  });
   const angle = ((viewport.rotation ?? 0) - annotation.rotation) * Math.PI / 180;
   const corners = [[0, 0], [width, 0], [0, height], [width, height]].map(([dx, dy]) =>
     [x + dx * Math.cos(angle) - dy * Math.sin(angle), y + dx * Math.sin(angle) + dy * Math.cos(angle)]);
-  return { x, y, size, width, height, lines, angle,
+  return { x, y, size, width, height, contentWidth, insetLeft, insetRight, lines, lineWidths, lineOffsets, lineRuns, angle,
     left: Math.min(...corners.map(p => p[0])), right: Math.max(...corners.map(p => p[0])),
     top: Math.min(...corners.map(p => p[1])), bottom: Math.max(...corners.map(p => p[1])) };
 }
@@ -114,9 +155,17 @@ function paintText(ctx, annotation, viewport) {
   const layout = textLayout(ctx, annotation, viewport);
   ctx.save();
   ctx.translate(layout.x, layout.y); ctx.rotate(layout.angle);
-  ctx.font = textFont(layout.size); ctx.textBaseline = 'top'; ctx.textAlign = 'left';
-  ctx.fillStyle = annotation.color;
-  layout.lines.forEach((line, index) => ctx.fillText(line, 0, index * layout.size * 1.3));
+  ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+  layout.lineRuns.flat().forEach(run => {
+    const { x, y, size, style } = run;
+    ctx.font = textFont(size, style); ctx.fillStyle = style.color; ctx.strokeStyle = style.color;
+    ctx.fillText(run.text, x, y);
+    if (style.underline && run.width > 0) {
+      ctx.lineWidth = size / 16;
+      ctx.beginPath(); ctx.moveTo(x, y + size * 1.05);
+      ctx.lineTo(x + run.width, y + size * 1.05); ctx.stroke();
+    }
+  });
   ctx.restore();
 }
 

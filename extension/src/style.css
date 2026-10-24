@@ -74,6 +74,16 @@ dialog.fullscreen-preview{position:fixed;inset:0;width:100vw;height:100dvh;max-w
 .fullscreen-footer>div{display:flex;align-items:center;gap:4px}.fullscreen-footer button{min-width:28px;height:30px;padding:0 6px;font-size:12px}.fullscreen-footer output{min-width:42px;text-align:center;font-size:11px;font-variant-numeric:tabular-nums}.fullscreen-footer>span{font-size:10px;color:var(--muted);white-space:nowrap}
 .fullscreen-status{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:max-content;max-width:calc(100% - 32px);margin:0;padding:8px 12px;border-radius:8px;background:var(--nav-bg);color:var(--ink);font-size:12px;text-align:center}
 .bulk-actions button{margin-top:6px;width:100%}
+.preview-menu .text-settings{display:grid;gap:8px}
+.text-font-field select{flex:1}
+.text-format-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.text-settings select{padding:5px 6px;font-size:11px}
+.text-style-buttons{display:flex;gap:4px}
+.text-style-buttons button{min-height:32px;font-size:11px}
+.text-style-buttons button[aria-pressed=true]{background:var(--accent-soft);border-color:var(--purple);color:var(--purple)}
+.text-style-buttons button[aria-pressed=mixed]{border-color:var(--purple);background:var(--surface-selected)}
+#text-handles .text-editor:empty::before{content:attr(data-placeholder);color:#777;line-height:1.3;pointer-events:none}
+#text-handles .text-editor[aria-invalid=true]{outline-color:var(--error)}
 #stroke-selection-actions .action-grid{grid-template-columns:1fr;margin-top:12px}
 
 .document-actions{position:fixed;right:16px;bottom:16px;z-index:5;display:flex;align-items:center;gap:8px}.document-actions .save-launcher{position:static}.print-launcher{display:grid;place-items:center;width:38px;height:38px;padding:8px;background:var(--surface);color:var(--purple);box-shadow:0 3px 12px var(--shadow)}.print-launcher svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
