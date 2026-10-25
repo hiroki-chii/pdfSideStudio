@@ -1,5 +1,6 @@
 @import url('./tokens.css');
-#ink-canvas.drawing ~ #text-handles .text-handle,#ink-canvas.inserting-text ~ #text-handles .text-handle{pointer-events:none;visibility:hidden}
+#ink-canvas.drawing ~ #text-handles .text-handle,#ink-canvas.inserting-text ~ #text-handles .text-handle,#ink-canvas.stamping ~ #text-handles .text-handle{pointer-events:none;visibility:hidden}
+#ink-canvas.stamping{cursor:crosshair;touch-action:none}.stamp-settings{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:12px 0}.stamp-settings label{display:flex;align-items:center;gap:6px;font-size:11px}.stamp-settings input[type=number]{width:64px}
 /* Tool menus overlay the paper without changing the preview size. */
 .preview-menu-layer{position:absolute;inset:0;z-index:3;pointer-events:none}
 .preview-menu-layer .preview-menu{position:absolute;top:0;left:0;right:0;height:auto;max-height:100%;pointer-events:auto;border-radius:0 0 10px 10px;box-shadow:0 6px 16px var(--shadow)}
@@ -38,7 +39,7 @@ textarea{font:inherit;min-width:0;border:1px solid var(--line);border-radius:8px
 .preview-topbar #preview-title{max-width:100%}
 .preview-topbar .preview-history{flex-shrink:0;align-self:flex-start}
 .preview-section .preview-toolbar{display:grid;grid-template-columns:minmax(0,1fr);padding:10px 8px}
-.preview-section .preview-toolbar .preview-tools{display:grid;min-width:0;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.preview-section .preview-toolbar .preview-tools{display:grid;min-width:0;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
 .preview-section .preview-toolbar .preview-tools .preview-tool-button{width:100%;min-width:0;height:60px;gap:4px;padding:6px 2px;border-width:2px;color:var(--muted);font-size:11px;font-weight:600;line-height:1.5}
 .preview-section .preview-toolbar .preview-tools .preview-tool-button[aria-pressed=true]{background:var(--accent-soft);border-color:var(--purple);color:var(--purple)}
 .preview-section .preview-tool-button:active:not(:disabled){transform:none}
@@ -94,6 +95,9 @@ dialog.fullscreen-preview{position:fixed;inset:0;width:100vw;height:100dvh;max-w
 .text-style-buttons button[aria-pressed=mixed]{border-color:var(--purple);background:var(--surface-selected)}
 #text-handles .text-editor:empty::before{content:attr(data-placeholder);color:#777;line-height:1.3;pointer-events:none}
 #text-handles .text-editor[aria-invalid=true]{outline-color:var(--error)}
+.stamp-pattern-field{margin-top:10px}
+#text-handles .text-editor[data-stamp-ink=light],#text-handles .text-editor[data-stamp-ink=light] [data-text-style]{color:#fff!important}
+#text-handles .text-editor[data-stamp-ink=dark],#text-handles .text-editor[data-stamp-ink=dark] [data-text-style]{color:#000!important}
 #stroke-selection-actions .action-grid{grid-template-columns:1fr;margin-top:12px}
 
 .document-actions{position:fixed;right:16px;bottom:16px;z-index:5;display:flex;align-items:center;gap:8px}.document-actions .save-launcher{position:static}.print-launcher{display:grid;place-items:center;width:38px;height:38px;padding:8px;background:var(--surface);color:var(--purple);box-shadow:0 3px 12px var(--shadow)}.print-launcher svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}

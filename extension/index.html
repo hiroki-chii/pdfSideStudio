@@ -44,6 +44,7 @@
                 <button id="open-select" class="preview-tool-button" type="button" aria-label="選択モード" aria-controls="panel-select" aria-pressed="true" title="選択・移動（Esc）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 10-7 1-3 7-4-18Z"/></svg><span>選択</span></button>
                 <button id="open-pen" class="preview-tool-button" type="button" aria-label="ペンの設定" aria-controls="panel-pen" aria-pressed="false" title="ペン・図形を描く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15l-1 6Z"/></svg><span>ペン</span></button>
                 <button id="open-text" class="preview-tool-button" type="button" aria-label="テキストボックスを配置" aria-controls="panel-text" aria-pressed="false" title="紙面をクリックしてテキストを配置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M12 5v15M8 20h8M4 5v3M20 5v3"/></svg><span>テキスト</span></button>
+                <button id="open-stamp" class="preview-tool-button" type="button" aria-label="番号スタンプ" aria-controls="panel-stamp" aria-pressed="false" title="クリックするたびに番号が増えるスタンプ"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3 7 21M17 3l-2 18M3 9h18M2 15h18"/></svg><span>番号</span></button>
                 <button id="open-rotation" class="preview-tool-button" type="button" aria-label="ページを回転" aria-controls="panel-rotation" aria-pressed="false" title="ページの回転設定を開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 2 8M4 4v6h6"/></svg><span>回転</span></button>
                 <button id="open-watermark" class="preview-tool-button" type="button" aria-label="透かしの設定" aria-controls="panel-watermark" aria-pressed="false" title="透かしの設定を開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3s-7 8-7 12a7 7 0 0 0 14 0c0-4-7-12-7-12Z"/><path d="M8 15a4 4 0 0 0 4 4"/></svg><span>透かし</span></button>
               </div>
@@ -76,6 +77,15 @@
               <p class="subtle">描画モードを開始すると太さ3pt・透明度0%に戻ります。設定は次に描く線・図形に適用されます。</p>
               </div>
               <div id="stroke-selection-actions" hidden><div class="action-grid"><button id="start-pen" type="button">新しく描く</button><button id="delete-stroke" class="danger">選択した描画を削除</button></div><p class="subtle">ドラッグまたは方向キーで移動。Shift＋方向キーで10pt移動。「元に戻す」で書式変更・移動・削除を取り消せます。Escまたは空白クリックで選択を解除します。</p></div>
+            </section>
+            <section id="panel-stamp" class="preview-menu" aria-labelledby="stamp-menu-title" hidden>
+              <div class="preview-menu-heading"><h2 id="stamp-menu-title">番号スタンプ</h2><button id="close-stamp" type="button">スタンプを終了</button></div>
+              <p class="tool-hint">紙面をクリックするたびに番号を押し、1つずつ増やします。ページを移動しても連番を続けます。</p>
+              <div class="inline-field"><label class="scope-label" for="stamp-number">次の番号</label><input id="stamp-number" type="number" min="1" max="9007199254740990" step="1" value="1" /></div>
+              <div class="inline-field stamp-pattern-field"><label class="scope-label" for="stamp-pattern">パターン</label><select id="stamp-pattern"><option value="plain">番号のみ</option><option value="circle">丸枠付き番号</option><option value="circle-filled">丸塗りつぶし</option><option value="square">四角枠付き番号</option><option value="square-filled">四角塗りつぶし</option></select></div>
+              <div class="stamp-settings"><label>色 <input id="stamp-color" type="color" value="#e05267" /></label><label>サイズ <input id="stamp-size" type="number" min="8" max="96" value="24" /> pt</label></div>
+              <p id="stamp-next-hint" class="target-hint" aria-live="polite">次に押す番号: 1</p>
+              <p class="subtle">「元に戻す」で配置と次の番号を戻せます。終了は「スタンプを終了」・「選択」・Esc。配置した番号は選択モードで移動・削除・テキストとして編集できます。</p>
             </section>
             <section id="panel-watermark" class="preview-menu" aria-labelledby="watermark-menu-title" hidden>
               <div class="preview-menu-heading"><h2 id="watermark-menu-title">透かしの設定</h2><button id="close-watermark" type="button">選択に戻る</button></div>

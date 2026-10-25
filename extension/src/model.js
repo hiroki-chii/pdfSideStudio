@@ -13,15 +13,17 @@ export class EditorModel {
   activeId = null;
   past = [];
   future = [];
+  nextStampNumber = 1;
 
-  snapshot() { return { pages: this.pages, activeId: this.activeId }; }
-  restore(state) { this.pages = state.pages; this.activeId = state.activeId; }
-  commit(pages, { activeId = this.activeId } = {}) {
+  snapshot() { return { pages: this.pages, activeId: this.activeId, nextStampNumber: this.nextStampNumber }; }
+  restore(state) { this.pages = state.pages; this.activeId = state.activeId; this.nextStampNumber = state.nextStampNumber; }
+  commit(pages, { activeId = this.activeId, nextStampNumber = this.nextStampNumber } = {}) {
     if (pages.length > MAX_PAGES) throw new Error(`一度に編集できるのは${MAX_PAGES}ページまでです。`);
     this.past.push(this.snapshot());
     if (this.past.length > 30) this.past.shift();
     this.future = [];
     this.pages = pages;
+    this.nextStampNumber = nextStampNumber;
     this.activeId = pages.some(p => p.id === activeId) ? activeId : (pages[0]?.id ?? null);
   }
   update(ids, transform) { this.commit(this.pages.map(p => ids.has(p.id) ? transform(p) : p)); }

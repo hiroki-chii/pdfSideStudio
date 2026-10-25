@@ -49,13 +49,14 @@ let dragPointer = null;
 let dragScrollFrame = null;
 let pageDrag = null;
 const uid = () => crypto.randomUUID();
-const previewMenus = ['rotation', 'pen', 'watermark'];
+const previewMenus = ['rotation', 'pen', 'stamp', 'watermark'];
 let activePreviewMenu = 'select';
 let previewMenuOpen = false;
 const toolDescriptions = {
   'open-select': '追加した文字・描画・透かしをクリックして選択。ドラッグで移動、Deleteで削除。Escで選択モードに戻ります。',
   'open-pen': '色・太さ・透明度を設定して紙面をドラッグ。「描画を終了」またはEscで選択モードに戻ります。',
   'open-text': '紙面をクリックしてテキストを1つ追加。「入力を確定」で選択モードに戻ります。配置前のEscで終了。',
+  'open-stamp': '紙面をクリックするたびに番号を配置し、次の番号を1つ増やします。Escで選択モードに戻ります。',
   'open-rotation': '対象ページを選び、方向ボタンで左右90度ずつ回転。「元に戻す」で取り消せます。',
   'open-watermark': '文字・色・濃さ・対象を設定し、「適用」で反映。対象ページの追加済み透かしを置き換えます。',
 };
@@ -152,6 +153,9 @@ function updateControls() {
   $('open-text').setAttribute('aria-label', textSelected ? 'テキストの書式設定' : 'テキストボックスを配置');
   $('open-text').title = textSelected ? '選択したテキストの書式設定を開く・閉じる' : toolDescriptions['open-text'];
   $('ink-canvas').classList.toggle('inserting-text', textEnabled && !busy);
+  $('ink-canvas').classList.toggle('stamping', activePreviewMenu === 'stamp' && !busy);
+  $('stamp-number').value = model.nextStampNumber;
+  $('stamp-next-hint').textContent = `次に押す番号: ${model.nextStampNumber}`;
   const watermarkPages = $('watermark-scope').value === 'all' ? model.pages : model.active ? [model.active] : [];
   const watermarkCount = watermarkPages.filter(page => page.watermark).length;
   $('apply-watermark').disabled = busy || !watermarkPages.length || !$('watermark-text').value.trim();
@@ -943,9 +947,10 @@ $('update-text').addEventListener('click', () => {
 
 function paintTextPreview() {
   if (!viewport || !model.active) return;
+  const stampDraft = textEdit?.draft.stampPattern && textEdit.draft.stampPattern !== 'plain' ? textEdit.draft : null;
   paintOverlay($('ink-canvas').getContext('2d'), { ...model.active,
-    strokes: model.active.strokes.filter(item => item.id !== textEdit?.original?.id)
-      .map(annotationPreview) }, viewport);
+    strokes: [...model.active.strokes.filter(item => item.id !== textEdit?.original?.id)
+      .map(annotationPreview), ...(stampDraft ? [stampDraft] : [])] }, viewport, { hideTextFor: stampDraft?.id });
 }
 
 function positionTextEditor() {
@@ -960,7 +965,8 @@ function positionTextEditor() {
   Object.assign(editor.style, { left: `${layout.x * scale}px`, top: `${layout.y * scale}px`,
     width: `${Math.max(layout.contentWidth * scale + 2, draft.text ? 0 : 60)}px`,
     paddingLeft: `${layout.insetLeft * scale}px`, paddingRight: `${layout.insetRight * scale}px`,
-    height: `${layout.height * scale + 2}px`, fontSize: `${layout.size * scale}px`,
+    paddingTop: `${(layout.stampInsetTop || 0) * scale}px`, paddingBottom: `${(layout.stampInsetBottom || 0) * scale}px`,
+    height: `${(layout.textHeight ?? layout.height) * scale + 2}px`, fontSize: `${layout.size * scale}px`,
     lineHeight: '1.3', color: draft.color, caretColor: draft.color,
     fontFamily: textFontFamily(draft.fontFamily), fontWeight: draft.bold ? '700' : '400',
     fontStyle: draft.italic ? 'italic' : 'normal', textDecoration: draft.underline ? 'underline' : 'none',
@@ -968,6 +974,12 @@ function positionTextEditor() {
     backgroundImage: `linear-gradient(${backgroundFill}, ${backgroundFill})`,
     backgroundSize: `${layout.width * scale}px ${layout.height * scale}px`, backgroundRepeat: 'no-repeat',
     transform: `rotate(${layout.angle}rad)` });
+  editor.dataset.stampInk = layout.stamp?.filled ? layout.stamp.textColor === '#ffffff' ? 'light' : 'dark' : '';
+  if (layout.stamp) {
+    editor.style.backgroundImage = 'none';
+    editor.style.caretColor = layout.stamp.textColor;
+    paintTextPreview();
+  }
 }
 
 function updateTextDraft() {
@@ -1530,8 +1542,46 @@ function pdfPoint(event) {
   const y = Math.max(0, Math.min(viewport.height, (event.clientY - rect.top) / rect.height * viewport.height));
   return viewport.convertToPdfPoint(x, y);
 }
+function placeNumberStamp(event) {
+  const number = model.nextStampNumber;
+  if (!Number.isSafeInteger(number) || number < 1 || number >= Number.MAX_SAFE_INTEGER) {
+    throw new Error('次の番号には1以上の安全な整数を指定してください。');
+  }
+  const fontSize = Number($('stamp-size').value);
+  if (!Number.isFinite(fontSize) || fontSize < 8 || fontSize > 96) throw new Error('サイズは8〜96ptで指定してください。');
+  const ctx = $('ink-canvas').getContext('2d');
+  let annotation = { id: uid(), tool: 'text', text: String(number), color: $('stamp-color').value,
+    fontSize, fontFamily: 'sans-serif', bold: true, textAlign: 'center',
+    stampPattern: ['circle', 'circle-filled', 'square', 'square-filled'].includes($('stamp-pattern').value) ? $('stamp-pattern').value : 'plain',
+    rotation: model.active.rotation, points: [pdfPoint(event)] };
+  const layout = textLayout(ctx, annotation, viewport);
+  if (layout.width > viewport.width || layout.height > viewport.height) throw new Error('番号が紙面に収まりません。サイズを小さくしてください。');
+  // Place the center at the click and keep the whole number inside the page.
+  annotation = moveText(ctx, annotation, viewport, -layout.width / 2, -layout.height / 2);
+  const pageId = model.activeId;
+  model.commit(model.pages.map(page => page.id === pageId ? { ...page, strokes: [...page.strokes, annotation] } : page),
+    { nextStampNumber: number + 1 });
+  paintOverlay(ctx, model.active, viewport);
+  refreshThumbnails(); refreshAnnotationHandles(); updateControls();
+  status(`番号 ${number} を配置しました。次は ${model.nextStampNumber} です。`, 'success');
+}
+$('stamp-number').addEventListener('change', () => {
+  const number = Number($('stamp-number').value);
+  if (!Number.isSafeInteger(number) || number < 1 || number >= Number.MAX_SAFE_INTEGER) {
+    $('stamp-number').value = model.nextStampNumber;
+    fail(new Error('次の番号には1以上の安全な整数を指定してください。')); return;
+  }
+  if (number !== model.nextStampNumber) model.commit(model.pages, { nextStampNumber: number });
+  updateControls();
+});
 $('ink-canvas').addEventListener('pointerdown', event => {
   if (event.button !== 0 || !event.isPrimary) return;
+  if (activePreviewMenu === 'stamp') {
+    if (busy || !viewport || !model.active || renderedPageId !== model.activeId || stroke || annotationDrag || pageDrag) return;
+    event.preventDefault();
+    try { placeNumberStamp(event); } catch (error) { fail(error); }
+    return;
+  }
   if (!textEnabled && !penEnabled && !busy && !annotationDrag && !stroke) {
     if (activePreviewMenu === 'select' || selectedAnnotationId) enableSelection();
     return;

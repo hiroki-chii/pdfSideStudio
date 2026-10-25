@@ -83,6 +83,28 @@ function setup() {
   return { context, $, model, original, errors };
 }
 
+test('editing framed and filled stamps preserves the frame, padded position, contrast and history', () => {
+  for (const stampPattern of ['circle', 'circle-filled', 'square', 'square-filled']) {
+    const { context, model, original } = setup();
+    const stamp = { ...original, text: '12', textAlign: 'center', stampPattern, color: '#e05267' };
+    model.update(new Set(['page']), page => ({ ...page, strokes: [stamp] }));
+    context.startTextEdit(stamp);
+    context.positionTextEditor();
+    const editor = context.textEdit.editor;
+    assert.ok(parseFloat(editor.style.paddingLeft) > 0);
+    assert.ok(parseFloat(editor.style.paddingTop) > 0);
+    assert.equal(editor.dataset.stampInk, stampPattern.endsWith('-filled') ? 'light' : '');
+    assert.equal(editor.style.backgroundImage, 'none');
+    editor.value = '123'; context.updateTextDraft();
+    assert.equal(context.textEdit.draft.stampPattern, stampPattern);
+    context.finishTextEdit();
+    assert.equal(model.active.strokes[0].text, '123');
+    assert.equal(model.active.strokes[0].stampPattern, stampPattern);
+    model.undo(); assert.equal(model.active.strokes[0].text, '12');
+    model.redo(); assert.equal(model.active.strokes[0].text, '123');
+  }
+});
+
 test('the text icon opens formatting without losing selection or an active draft', () => {
   const { context, model, original } = setup();
   context.togglePreviewMenu('text');

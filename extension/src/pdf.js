@@ -39,7 +39,7 @@ export function moveWatermark(ctx, watermark, viewport, dx, dy) {
   return { ...watermark, points: [viewport.convertToPdfPoint(layout.cx + dx, layout.cy + dy)] };
 }
 
-export function paintOverlay(ctx, record, viewport) {
+export function paintOverlay(ctx, record, viewport, { hideTextFor } = {}) {
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   if (record.watermark) {
     const { text, color, opacity } = record.watermark;
@@ -56,7 +56,7 @@ export function paintOverlay(ctx, record, viewport) {
     ctx.restore();
   }
   for (const stroke of record.strokes) {
-    if (stroke.tool === 'text') paintText(ctx, stroke, viewport);
+    if (stroke.tool === 'text') paintText(ctx, stroke, viewport, stroke.id !== undefined && stroke.id === hideTextFor);
     else paintStroke(ctx, stroke, viewport);
   }
 }
@@ -80,6 +80,7 @@ export function textLayout(ctx, annotation, viewport) {
     });
   }
   ctx.save();
+  ctx.textBaseline = 'top'; ctx.textAlign = 'left';
   const metrics = [], lineSizes = [], lineStyles = [];
   for (const runs of lineRuns) {
     let width = 0, left = 0, right = 0;
@@ -90,6 +91,10 @@ export function textLayout(ctx, annotation, viewport) {
       const measured = ctx.measureText(run.text);
       run.x = width; run.width = measured.width;
       run.y = maxSize - run.size;
+      run.inkAscent = measured.actualBoundingBoxAscent;
+      run.inkDescent = measured.actualBoundingBoxDescent;
+      run.inkLeft = measured.actualBoundingBoxLeft;
+      run.inkRight = measured.actualBoundingBoxRight;
       left = Math.max(left, (measured.actualBoundingBoxLeft || 0) - width);
       right = Math.max(right, width + (measured.actualBoundingBoxRight || 0));
       width += measured.width;
@@ -100,9 +105,9 @@ export function textLayout(ctx, annotation, viewport) {
   const lineWidths = metrics.map(metric => metric.width);
   const contentWidth = Math.max(size * 0.2, ...lineWidths);
   // Include glyph overhang (especially italics) in selection and page-edge checks.
-  const insetLeft = Math.max(0, ...metrics.map(metric => metric.actualBoundingBoxLeft || 0));
-  const insetRight = Math.max(0, ...metrics.map(metric => (metric.actualBoundingBoxRight || 0) - metric.width));
-  const width = contentWidth + insetLeft + insetRight;
+  let insetLeft = Math.max(0, ...metrics.map(metric => metric.actualBoundingBoxLeft || 0));
+  let insetRight = Math.max(0, ...metrics.map(metric => (metric.actualBoundingBoxRight || 0) - metric.width));
+  let width = contentWidth + insetLeft + insetRight;
   const lineOffsets = lineWidths.map((lineWidth, index) => insetLeft + (contentWidth - lineWidth)
     * (lineStyles[index].textAlign === 'center' ? 0.5 : lineStyles[index].textAlign === 'right' ? 1 : 0));
   ctx.restore();
@@ -111,10 +116,35 @@ export function textLayout(ctx, annotation, viewport) {
     runs.forEach(run => { run.x += lineOffsets[index]; run.y += height; });
     height += lineSizes[index] * 1.3;
   });
+  const textHeight = height;
+  let stamp = null, stampInsetTop = 0, stampInsetBottom = 0;
+  if (['circle', 'circle-filled', 'square', 'square-filled'].includes(annotation.stampPattern)) {
+    const circle = annotation.stampPattern.startsWith('circle');
+    const filled = annotation.stampPattern.endsWith('-filled');
+    const padding = Math.max(size, ...lineSizes) * 0.5;
+    const side = (circle ? Math.hypot(width, height) : Math.max(width, height)) + padding;
+    const inset = (side - width) / 2;
+    // Center visible glyphs rather than the line box, which includes uneven leading.
+    const ink = lineRuns.flat().filter(run => run.inkAscent + run.inkDescent > 0);
+    const offsetX = ink.length ? width / 2 - (Math.min(...ink.map(run => run.x - run.inkLeft))
+      + Math.max(...ink.map(run => run.x + run.inkRight))) / 2 : 0;
+    const offsetY = ink.length ? height / 2 - (Math.min(...ink.map(run => run.y - run.inkAscent))
+      + Math.max(...ink.map(run => run.y + run.inkDescent))) / 2 : 0;
+    stampInsetTop = (side - height) / 2 + offsetY;
+    stampInsetBottom = (side - height) / 2 - offsetY;
+    insetLeft += inset + offsetX; insetRight += inset - offsetX;
+    lineRuns.flat().forEach(run => { run.x += inset + offsetX; run.y += stampInsetTop; });
+    const channels = (annotation.color.match(/[\da-f]{2}/gi) || []).map(value => parseInt(value, 16));
+    const light = channels.length === 3 && channels[0] * 0.299 + channels[1] * 0.587 + channels[2] * 0.114 > 160;
+    stamp = { circle, filled, color: annotation.color, textColor: filled ? light ? '#000000' : '#ffffff' : annotation.color,
+      lineWidth: Math.max(size, ...lineSizes) / 14 };
+    width = height = side;
+  }
   const angle = ((viewport.rotation ?? 0) - annotation.rotation) * Math.PI / 180;
   const corners = [[0, 0], [width, 0], [0, height], [width, height]].map(([dx, dy]) =>
     [x + dx * Math.cos(angle) - dy * Math.sin(angle), y + dx * Math.sin(angle) + dy * Math.cos(angle)]);
   return { x, y, size, width, height, contentWidth, insetLeft, insetRight, lines, lineWidths, lineOffsets, lineRuns, angle,
+    stamp, stampInsetTop, stampInsetBottom, textHeight,
     left: Math.min(...corners.map(p => p[0])), right: Math.max(...corners.map(p => p[0])),
     top: Math.min(...corners.map(p => p[1])), bottom: Math.max(...corners.map(p => p[1])) };
 }
@@ -181,19 +211,31 @@ export function scaleStrokes(strokes, viewport, factor) {
   }) }));
 }
 
-function paintText(ctx, annotation, viewport) {
+function paintText(ctx, annotation, viewport, hideText = false) {
   const layout = textLayout(ctx, annotation, viewport);
   ctx.save();
   ctx.translate(layout.x, layout.y); ctx.rotate(layout.angle);
   const background = textBackground(annotation);
-  if (background.color !== 'none' && background.opacity > 0) {
+  if (!layout.stamp && background.color !== 'none' && background.opacity > 0) {
     ctx.save(); ctx.fillStyle = background.color; ctx.globalAlpha = background.opacity;
     ctx.fillRect(0, 0, layout.width, layout.height); ctx.restore();
   }
+  if (layout.stamp) {
+    const { circle, filled, color, lineWidth } = layout.stamp;
+    const inset = lineWidth / 2;
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    if (circle) ctx.arc(layout.width / 2, layout.height / 2, (layout.width - lineWidth) / 2, 0, Math.PI * 2);
+    else ctx.rect(inset, inset, layout.width - lineWidth, layout.height - lineWidth);
+    if (filled) ctx.fill();
+    ctx.stroke();
+  }
+  if (hideText) { ctx.restore(); return; }
   ctx.textBaseline = 'top'; ctx.textAlign = 'left';
   layout.lineRuns.flat().forEach(run => {
     const { x, y, size, style } = run;
-    ctx.font = textFont(size, style); ctx.fillStyle = style.color; ctx.strokeStyle = style.color;
+    const color = layout.stamp?.filled ? layout.stamp.textColor : style.color;
+    ctx.font = textFont(size, style); ctx.fillStyle = color; ctx.strokeStyle = color;
     ctx.fillText(run.text, x, y);
     if (style.underline && run.width > 0) {
       ctx.lineWidth = size / 16;
