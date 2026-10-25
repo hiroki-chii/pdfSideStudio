@@ -1,4 +1,4 @@
-import { styledRuns, textStyle, withTextRuns, replaceText } from './text-format.js';
+import { styledRuns, textStyle, withTextRuns, replaceText, formatTextBackground } from './text-format.js';
 import { textFontFamily } from './pdf.js';
 
 export function createTextEditor(annotation) {
@@ -85,6 +85,8 @@ export function createTextEditor(annotation) {
     editor.replaceChildren(fragment); rendering = false;
   }
   editor.getAnnotation = read;
+  // Box-only changes must not rebuild the DOM or steal focus from a live slider.
+  editor.setBackground = patch => { current = formatTextBackground(current, patch); };
   editor.setAnnotation = value => { const range = capture(); render(value); restore(range.start, range.end); };
   editor.setSelectionRange = restore;
   editor.setCustomValidity = message => { editor.setAttribute('aria-invalid', String(!!message)); editor.dataset.error = message; };

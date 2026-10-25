@@ -72,6 +72,19 @@ dialog.fullscreen-preview{position:fixed;inset:0;width:100vw;height:100dvh;max-w
 .fullscreen-footer>div{display:flex;align-items:center;gap:4px}.fullscreen-footer button{min-width:28px;height:30px;padding:0 6px;font-size:12px}.fullscreen-footer output{min-width:42px;text-align:center;font-size:11px;font-variant-numeric:tabular-nums}.fullscreen-footer>span{font-size:10px;color:var(--muted);white-space:nowrap}
 .fullscreen-status{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:max-content;max-width:calc(100% - 32px);margin:0;padding:8px 12px;border-radius:8px;background:var(--nav-bg);color:var(--ink);font-size:12px;text-align:center}
 .preview-menu .text-settings{display:grid;gap:8px}
+.text-settings-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;padding:3px;border:1px solid var(--line);border-radius:8px;background:var(--tabs-bg)}
+.text-settings-tabs button{border-color:transparent;background:transparent;min-height:30px;font-size:11px;color:var(--muted)}
+.text-settings-tabs button[aria-selected=true]{border-color:var(--border-accent);background:var(--surface);color:var(--purple);font-weight:650}
+.text-settings-group{display:grid;gap:6px;min-width:0;margin:0;padding:6px 10px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.text-settings-group legend{padding:0 5px;font-size:11px;font-weight:650;color:var(--muted)}
+.text-settings-group .text-style-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+.text-settings-group .text-font-field{display:grid;grid-template-columns:4em minmax(0,1fr)}
+.text-settings-group .subtle{margin:0;font-size:10px}
+.text-settings .text-background-opacity{display:grid;grid-template-columns:1fr auto;gap:4px 8px}
+.text-background-opacity input{grid-column:1/-1;width:100%;margin:0;min-height:20px}
+.text-background-opacity output{font-variant-numeric:tabular-nums}
+.text-shortcuts{margin-top:10px;font-size:11px;color:var(--muted)}
+.text-shortcuts summary{cursor:pointer}
 .text-font-field select{flex:1}
 .text-format-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
 .text-settings select{padding:5px 6px;font-size:11px}

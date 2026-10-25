@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { createCanvas } from '@napi-rs/canvas';
 import { EditorModel } from '../src/model.js';
 import { textFont, textFontFamily, textLayout, moveText, moveStroke, strokeLayout, paintOverlay } from '../src/pdf.js';
-import { styledRuns, textStyle, formatText, replaceText } from '../src/text-format.js';
+import { styledRuns, textStyle, textBackground, formatTextBackground, formatText, replaceText } from '../src/text-format.js';
 
 const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
 const slice = (start, end) => app.slice(app.indexOf(start), app.indexOf(end));
@@ -57,11 +57,12 @@ function setup() {
     convertToPdfPoint: (x, y) => [x, y], convertToViewportPoint: (x, y) => [x, y] };
   const errors = [];
   const context = vm.createContext({ $, model, viewport, textLayout, moveText, moveStroke, strokeLayout, paintOverlay, textFontFamily,
-    styledRuns, textStyle, formatText, replaceText,
+    styledRuns, textStyle, textBackground, formatTextBackground, formatText, replaceText,
     createTextEditor(annotation) {
       const editor = node(); editor.value = annotation.text;
       editor.getAnnotation = () => replaceText(context.textEdit?.draft || annotation, editor.value);
-      editor.setAnnotation = value => { editor.value = value.text; };
+      editor.setAnnotation = value => { editor.value = value.text; editor.renderCount = (editor.renderCount || 0) + 1; };
+      editor.setBackground = () => { editor.backgroundUpdated = true; };
       return editor;
     },
     busy: false, selectedAnnotationId: 'text', selectedStrokeIds: new Set(), selectedTextIds: new Set(),
@@ -293,6 +294,248 @@ test('returning the size input to its baseline preserves history and partial low
   context.handleTextShortcut(key('ArrowUp', true));
   assert.deepEqual(styledRuns(model.active.strokes[0]).map(run => run.style.fontSize), [25, 9, 25]);
   assert.equal(model.active.strokes[1].fontSize, 37);
+});
+
+test('white and black box backgrounds preview live, keep text styles and create one history entry per gesture', () => {
+  for (const color of ['#ffffff', '#000000']) {
+    const { context, $, model, original } = setup();
+    const rich = formatText(original, 1, 4, { bold: true, fontSize: 30 });
+    model.update(new Set(['page']), page => ({ ...page, strokes: [rich] }));
+    context.selectAnnotation(rich);
+    const history = model.past.length;
+    $('text-background').value = color; $('text-background').handlers.input();
+    assert.equal(context.annotationFormatPreview.backgroundColor, color);
+    assert.equal(model.active.strokes[0], rich);
+    $('text-background').handlers.change(); $('text-background').handlers.blur();
+    assert.equal(model.active.strokes[0].backgroundColor, color); assert.equal(model.past.length, history + 1);
+    for (const value of ['25', '60']) {
+      $('text-background-opacity').value = value; $('text-background-opacity').handlers.input();
+    }
+    assert.equal(context.annotationFormatPreview.backgroundOpacity, 0.6);
+    assert.equal($('text-background-opacity-value').value, '60%');
+    $('text-background-opacity').handlers.change(); $('text-background-opacity').handlers.blur();
+    const changed = model.active.strokes[0];
+    assert.equal(changed.backgroundOpacity, 0.6); assert.equal(model.past.length, history + 2);
+    assert.deepEqual(changed.runs, rich.runs); assert.equal(changed.color, rich.color);
+    model.undo(); assert.equal(textBackground(model.active.strokes[0]).opacity, 1);
+    model.redo(); assert.equal(model.active.strokes[0], changed);
+    context.handleTextShortcut(key('ArrowUp', true));
+    assert.equal(model.active.strokes[0].backgroundColor, color); assert.equal(model.active.strokes[0].backgroundOpacity, 0.6);
+  }
+});
+
+test('background settings apply to every selected text box and preserve unselected objects and page content', () => {
+  const { context, $, model, unselected } = multipleSetup();
+  const otherPage = model.pages[1], history = model.past.length;
+  $('text-background').value = '#000000'; $('text-background').handlers.change();
+  $('text-background-opacity').value = '45'; $('text-background-opacity').handlers.change();
+  assert.ok(model.active.strokes.slice(0, 2).every(item => item.backgroundColor === '#000000' && item.backgroundOpacity === 0.45));
+  assert.equal(context.selectedTexts().length, 2); assert.equal(model.active.strokes[2], unselected);
+  assert.equal(model.pages[1], otherPage); assert.equal(model.past.length, history + 2);
+  model.undo(); assert.ok(model.active.strokes.slice(0, 2).every(item => textBackground(item).opacity === 1));
+  model.undo(); assert.ok(model.active.strokes.slice(0, 2).every(item => textBackground(item).color === 'none'));
+});
+
+test('Ctrl+Left/Right decrease/increase selected text background opacity, update controls and support Undo/Redo', () => {
+  for (const color of ['#ffffff', '#000000']) {
+    const { context, $, model, original } = setup();
+    original.backgroundColor = color; original.backgroundOpacity = 0.7;
+    const documentHandlers = {};
+    context.document.addEventListener = (type, handler) => { documentHandlers[type] = handler; };
+    vm.runInContext(slice("document.addEventListener('keydown', event => {", '\nlet resizeTimer;'), context);
+    const history = model.past.length;
+    const event = key('ArrowRight', true, { target: { closest: () => null } });
+    documentHandlers.keydown(event);
+    assert.equal(event.prevented && event.stopped, true);
+    const changed = model.active.strokes[0];
+    assert.equal(changed.backgroundOpacity, 0.71); assert.equal(changed.backgroundColor, color);
+    assert.equal(changed.fontSize, original.fontSize); assert.equal(changed.text, original.text);
+    assert.deepEqual(changed.points, original.points); assert.equal(changed.color, original.color);
+    assert.equal(Number($('text-background-opacity').value), 71);
+    assert.equal($('text-background-opacity-value').value, '71%');
+    assert.equal(model.past.length, history + 1);
+    model.undo(); assert.equal(model.active.strokes[0], original);
+    model.redo(); assert.equal(model.active.strokes[0], changed);
+    assert.equal(context.handleTextShortcut(key('ArrowLeft', false, { metaKey: true })), true);
+    assert.equal(model.active.strokes[0].backgroundOpacity, 0.7);
+  }
+});
+
+test('group opacity shortcuts preserve differences, stop at either limit and handle fractional boundaries', () => {
+  for (const firstAnchor of [true, false]) {
+    const { context, model, original, other, unselected } = multipleSetup();
+    original.backgroundColor = '#ffffff'; original.backgroundOpacity = 0.4;
+    other.backgroundColor = '#000000'; other.backgroundOpacity = 0.8;
+    context.selectAnnotation(firstAnchor ? original : other, { preserve: true });
+    const history = model.past.length, otherPage = model.pages[1];
+    context.handleTextShortcut(key('ArrowRight', true));
+    assert.deepEqual(model.active.strokes.slice(0, 2).map(item => item.backgroundOpacity), [0.41, 0.81]);
+    assert.equal(model.past.length, history + 1); assert.equal(context.selectedTexts().length, 2);
+    assert.equal(model.active.strokes[2], unselected); assert.equal(model.pages[1], otherPage);
+    model.undo(); assert.equal(model.active.strokes[0], original); assert.equal(model.active.strokes[1], other);
+    for (const [opacity, direction, reverse] of [[0, 'ArrowLeft', 'ArrowRight'], [1, 'ArrowRight', 'ArrowLeft']]) {
+      original.backgroundOpacity = opacity;
+      const before = model.past.length; model.future.push(model.snapshot());
+      const redo = model.future.length;
+      context.handleTextShortcut(key(direction, true));
+      assert.equal(model.past.length, before); assert.equal(model.future.length, redo);
+      context.handleTextShortcut(key(reverse, true));
+      assert.equal(model.past.length, before + 1);
+      model.undo();
+    }
+    original.backgroundOpacity = 0.005; other.backgroundOpacity = 0.7;
+    context.handleTextShortcut(key('ArrowLeft', true));
+    assert.deepEqual(model.active.strokes.slice(0, 2).map(item => textBackground(item).opacity), [0, 0.695]);
+    const before = model.past.length;
+    context.handleTextShortcut(key('ArrowLeft', true)); assert.equal(model.past.length, before);
+    context.handleTextShortcut(key('ArrowRight', true));
+    assert.deepEqual(model.active.strokes.slice(0, 2).map(item => textBackground(item).opacity), [0.01, 0.705]);
+  }
+});
+
+test('editing opacity shortcuts preserve the caret, draft and text styles and commit once with the text', () => {
+  const { context, model, original } = setup();
+  original.backgroundColor = '#000000'; original.backgroundOpacity = 0.5;
+  const history = model.past.length;
+  context.startTextEdit(original);
+  const editor = context.textEdit.editor;
+  editor.value = '入力中の文字'; editor.setSelectionRange(2, 2);
+  for (const repeat of [false, true]) editor.handlers.keydown(key('ArrowRight', true, {
+    repeat, target: { closest: () => editor },
+  }));
+  assert.equal(context.textEdit.draft.text, editor.value);
+  assert.equal(context.textEdit.draft.backgroundOpacity, 0.52);
+  assert.equal(editor.selectionStart, 2); assert.equal(editor.selectionEnd, 2);
+  assert.equal(editor.renderCount || 0, 0); assert.equal(editor.backgroundUpdated, true);
+  assert.match(editor.style.backgroundImage, /0 0 0.*0\.52/);
+  assert.equal(model.past.length, history);
+  context.finishTextEdit(); assert.equal(model.past.length, history + 1);
+  assert.equal(model.active.strokes[0].backgroundOpacity, 0.52);
+  model.undo(); assert.equal(model.active.strokes[0], original);
+});
+
+test('opacity shortcuts ignore backgroundless boxes, other inputs, modifiers, IME, dialogs and active gestures', () => {
+  const { context, model, original, $ } = setup();
+  const history = model.past.length; model.future.push(model.snapshot());
+  assert.equal(context.handleTextShortcut(key('ArrowRight', true)), true);
+  assert.equal(model.past.length, history); assert.equal(model.future.length, 1);
+  original.backgroundColor = '#ffffff'; original.backgroundOpacity = 0.5;
+  for (const extra of [{ isComposing: true }, { keyCode: 229 }, { altKey: true }, { shiftKey: true },
+    { ctrlKey: false }, { defaultPrevented: true }, { target: { closest: () => ({}) } }]) {
+    const event = key('ArrowRight', true, extra);
+    assert.equal(context.handleTextShortcut(event), false); assert.equal(event.prevented, undefined);
+  }
+  for (const guard of ['busy', 'stroke', 'annotationDrag', 'pageDrag']) {
+    context[guard] = true;
+    assert.equal(context.handleTextShortcut(key('ArrowLeft', true)), false);
+    context[guard] = null;
+  }
+  for (const dialog of ['help-dialog', 'save-dialog', 'fullscreen-preview']) {
+    $(dialog).open = true;
+    assert.equal(context.handleTextShortcut(key('ArrowRight', true)), false);
+    $(dialog).open = false;
+  }
+  assert.equal(model.past.length, history); assert.equal(model.active.strokes[0], original);
+  const env = multipleSetup();
+  env.other.backgroundColor = '#ffffff'; env.other.backgroundOpacity = 0.5;
+  env.context.handleTextShortcut(key('ArrowRight', true));
+  assert.equal(env.model.active.strokes[0], env.original);
+  assert.equal(env.model.active.strokes[1].backgroundOpacity, 0.51);
+});
+
+test('backgrounds change the whole active draft without selecting characters, and cancel or commit with the text', () => {
+  const { context, $, model, original } = setup();
+  const history = model.past.length;
+  context.startTextEdit(original);
+  const editor = context.textEdit.editor;
+  editor.value = '入力途中の文字'; editor.setSelectionRange(2, 2);
+  $('text-background').value = '#ffffff'; $('text-background').handlers.change();
+  $('text-background-opacity').value = '35'; $('text-background-opacity').handlers.change();
+  assert.equal(context.textEdit.draft.text, editor.value);
+  assert.equal(context.textEdit.draft.backgroundOpacity, 0.35);
+  assert.match(editor.style.backgroundImage, /255 255 255.*0\.35/);
+  assert.equal(editor.backgroundUpdated, true); assert.equal(editor.renderCount || 0, 0);
+  assert.equal(editor.selectionStart, 2); assert.equal(editor.selectionEnd, 2);
+  assert.equal(model.past.length, history);
+  context.finishTextEdit(true); assert.equal(model.active.strokes[0], original);
+  context.startTextEdit(original);
+  $('text-background').value = '#000000'; $('text-background').handlers.change();
+  context.finishTextEdit();
+  assert.equal(model.active.strokes[0].backgroundColor, '#000000'); assert.equal(model.past.length, history + 1);
+});
+
+test('new text insertion starts with black at zero opacity, retains settings while reopening and preserves existing text', () => {
+  const { context, $, model, original } = setup();
+  original.backgroundColor = '#ffffff'; original.backgroundOpacity = 0.8;
+  context.selectAnnotation(original);
+  context.enableSelection(); context.enableTextInsertion();
+  assert.equal($('text-background').value, '#000000');
+  assert.equal(Number($('text-background-opacity').value), 0);
+  assert.equal($('text-background-opacity-value').value, '0%');
+  Object.assign(context, { uid: () => 'new-default', pdfPoint: () => [60, 300], fail(error) { throw error; } });
+  vm.runInContext(slice("$('ink-canvas').addEventListener('pointerdown', event => {", "\n$('help').addEventListener"), context);
+  $('ink-canvas').handlers.pointerdown(pointer(60, 300));
+  assert.equal(context.textEdit.draft.backgroundColor, '#000000');
+  assert.equal(context.textEdit.draft.backgroundOpacity, 0);
+  context.textEdit.editor.value = 'Default background'; context.finishTextEdit();
+  assert.equal(model.active.strokes.at(-1).backgroundColor, '#000000');
+  assert.equal(model.active.strokes.at(-1).backgroundOpacity, 0);
+  context.handleTextShortcut(key('ArrowRight', true));
+  assert.equal(model.active.strokes.at(-1).backgroundOpacity, 0.01);
+  context.handleTextShortcut(key('ArrowLeft', true));
+  assert.equal(model.active.strokes.at(-1).backgroundOpacity, 0);
+  assert.equal(model.active.strokes[0], original); assert.equal(original.backgroundOpacity, 0.8);
+  context.enableSelection(); context.enableTextInsertion();
+  assert.equal(Number($('text-background-opacity').value), 0);
+  $('text-background').value = '#ffffff'; $('text-background').handlers.change();
+  $('text-background-opacity').value = '65'; $('text-background-opacity').handlers.change();
+  context.togglePreviewMenu('text'); context.togglePreviewMenu('text');
+  assert.equal($('text-background').value, '#ffffff'); assert.equal(Number($('text-background-opacity').value), 65);
+  context.enableSelection(); context.enableTextInsertion();
+  assert.equal($('text-background').value, '#000000'); assert.equal(Number($('text-background-opacity').value), 0);
+  // Entering insertion via a page switch must not inherit the selected box's background.
+  model.commit([...model.pages, { id: 'second-page', strokes: [] }]);
+  context.selectAnnotation(original); context.enableTextInsertion();
+  context.document.querySelectorAll = () => []; context.renderPreview = () => {};
+  vm.runInContext(slice('function activate(', '\nfunction navigatePage('), context);
+  context.activate('second-page');
+  assert.equal(context.textEnabled, true);
+  assert.equal($('text-background').value, '#000000'); assert.equal(Number($('text-background-opacity').value), 0);
+});
+
+test('opacity inputs preserve fully transparent backgrounds and removing a background preserves legacy data', () => {
+  const { context, $, model, original } = setup();
+  const history = model.past.length; model.future.push(model.snapshot());
+  $('text-background').value = 'none'; $('text-background').handlers.change();
+  assert.equal(model.past.length, history); assert.equal(model.future.length, 1);
+  context.enableSelection();
+  $('text-background').value = '#ffffff'; $('text-background').handlers.change();
+  $('text-background-opacity').value = '0'; $('text-background-opacity').handlers.change();
+  const settings = context.textSettings();
+  assert.equal(settings.backgroundColor, '#ffffff'); assert.equal(settings.backgroundOpacity, 0);
+  assert.equal(model.active.strokes[0], original);
+  context.startTextEdit({ ...original, ...settings, id: 'new', text: '' }, true);
+  context.textEdit.editor.value = 'New'; context.finishTextEdit();
+  assert.equal(model.active.strokes.at(-1).backgroundOpacity, 0);
+  $('text-background-opacity').value = '100'; $('text-background-opacity').handlers.change();
+  assert.equal(textBackground(model.active.strokes.at(-1)).opacity, 1);
+  $('text-background').value = 'none'; $('text-background').handlers.change();
+  assert.equal(model.active.strokes.at(-1).backgroundColor, undefined);
+});
+
+test('settings tabs commit a pending group background preview and support keyboard navigation without changing selection', () => {
+  const { context, $, model } = multipleSetup();
+  const history = model.past.length;
+  $('text-background').value = '#ffffff'; $('text-background').handlers.input();
+  $('text-tab-background').handlers.click();
+  assert.equal(model.past.length, history + 1);
+  assert.equal($('text-background-settings').hidden, false); assert.equal($('text-character-settings').hidden, true);
+  assert.equal($('text-tab-background').getAttribute('aria-selected'), 'true');
+  assert.equal($('text-tab-characters').tabIndex, -1); assert.equal(context.selectedTexts().length, 2);
+  const event = key('ArrowLeft'); $('text-tab-background').handlers.keydown(event);
+  assert.equal(event.prevented && event.stopped, true);
+  assert.equal($('text-character-settings').hidden, false); assert.equal($('text-background-settings').hidden, true);
+  assert.equal($('text-tab-characters').focused, true); assert.equal(model.past.length, history + 1);
 });
 
 test('finishing a text draft commits the group preview before a selection change and individual editing clears the group', () => {

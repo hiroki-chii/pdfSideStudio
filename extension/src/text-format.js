@@ -4,6 +4,18 @@ const defaults = { fontSize: 24, color: '#222222', fontFamily: 'sans-serif',
 export function textStyle(value = {}) {
   return Object.fromEntries(Object.entries(defaults).map(([key, fallback]) => [key, value[key] ?? fallback]));
 }
+// Background belongs to the box, independently of character selections and runs.
+export function textBackground(annotation = {}) {
+  return { color: ['#ffffff', '#000000'].includes(annotation.backgroundColor) ? annotation.backgroundColor : 'none',
+    opacity: Number.isFinite(annotation.backgroundOpacity) ? Math.max(0, Math.min(1, annotation.backgroundOpacity)) : 1 };
+}
+export function formatTextBackground(annotation, patch) {
+  const result = { ...annotation, ...patch };
+  const { color, opacity } = textBackground(result);
+  if (color === 'none') delete result.backgroundColor; else result.backgroundColor = color;
+  if (opacity === 1) delete result.backgroundOpacity; else result.backgroundOpacity = opacity;
+  return result;
+}
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 export function styledRuns(annotation) {

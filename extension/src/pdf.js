@@ -1,6 +1,6 @@
 import { PDFDocument, degrees } from 'pdf-lib';
 import { normalizeRotation } from './model.js';
-import { styledRuns, textStyle } from './text-format.js';
+import { styledRuns, textStyle, textBackground } from './text-format.js';
 
 export function imagePlacement(viewport) {
   const [x, y] = viewport.convertToPdfPoint(0, viewport.height);
@@ -185,6 +185,11 @@ function paintText(ctx, annotation, viewport) {
   const layout = textLayout(ctx, annotation, viewport);
   ctx.save();
   ctx.translate(layout.x, layout.y); ctx.rotate(layout.angle);
+  const background = textBackground(annotation);
+  if (background.color !== 'none' && background.opacity > 0) {
+    ctx.save(); ctx.fillStyle = background.color; ctx.globalAlpha = background.opacity;
+    ctx.fillRect(0, 0, layout.width, layout.height); ctx.restore();
+  }
   ctx.textBaseline = 'top'; ctx.textAlign = 'left';
   layout.lineRuns.flat().forEach(run => {
     const { x, y, size, style } = run;

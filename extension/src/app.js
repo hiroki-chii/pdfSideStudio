@@ -9,7 +9,7 @@ import { buildPdf, imagePlacement, paintOverlay, textFontFamily, textLayout, mov
 import { createThemeController } from './theme.js';
 import { storePrintJob, deletePrintJob } from './print-job.js';
 import { createFullscreenPreview } from './fullscreen-preview.js';
-import { styledRuns, textStyle, formatText, replaceText } from './text-format.js';
+import { styledRuns, textStyle, textBackground, formatTextBackground, formatText, replaceText } from './text-format.js';
 import { createTextEditor } from './text-editor.js';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -135,10 +135,10 @@ function updateControls() {
       : '色・太さ・透明度は選択した描画だけにすぐ反映されます。Shift＋クリックで描画を追加選択できます。'
     : '紙面をドラッグして描きます。終了するには「描画を終了」かEsc。';
   $('text-menu-title').textContent = textEdit ? 'テキストを入力中' : textCount > 1 ? `選択したテキスト（${textCount}件）` : selectedText() ? '選択したテキスト' : 'テキストを配置';
-  $('text-mode-hint').textContent = textEdit ? '文字の書式は選択範囲に、配置は選択した行に反映されます。'
-    : textCount > 1 ? '書式は選択全体に適用します。サイズは各テキストの差を保って増減し、1つでも8〜96ptの限界に達すると全体が止まります。数値は最後に選んだテキストの値です。'
-      : selectedText() ? '書式は選択したテキスト全体にすぐ反映されます。Shift＋クリックで追加選択・解除できます。'
-      : '紙面を1回クリックして入力します。書式は新しいテキスト全体に適用されます。';
+  $('text-mode-hint').textContent = textEdit ? '文字書式は選択範囲に、背景はボックス全体に適用します。'
+    : textCount > 1 ? `選択した${textCount}件に一括適用。サイズは差を保ち、8〜96ptの最初の境界で全体が止まります。`
+      : selectedText() ? '文字・背景をすぐ反映。Shift＋クリックで追加選択・解除できます。'
+      : '紙面クリックで入力。文字・背景は新しいボックスに適用します。';
   $('close-text').textContent = textEdit ? '確定して終了' : selectedText() ? '選択を解除' : '配置を終了';
   $('text-selection-actions').hidden = !selectedText() || !!textEdit;
   $('text-edit-actions').hidden = !textEdit;
@@ -418,9 +418,11 @@ function activate(id) {
   if (annotationDrag || stroke) return;
   // Committing text ends insertion, so restore the tool after changing pages.
   const menu = activePreviewMenu;
+  const wasInsertingText = textEnabled;
   if (!finishTextEdit()) return;
   activePreviewMenu = menu;
   penEnabled = menu === 'pen'; textEnabled = menu === 'text';
+  if (textEnabled && !wasInsertingText) resetTextBackgroundSettings();
   selectedAnnotationId = null;
   selectedTextIds.clear(); selectedStrokeIds.clear();
   model.activeId = id;
@@ -885,8 +887,12 @@ function annotationPreview(annotation) {
 function textSettings() {
   const fontSize = Number($('text-size').value);
   if (!Number.isFinite(fontSize) || fontSize < 8 || fontSize > 96) throw new Error('文字サイズは8〜96ptで指定してください。');
+  const background = textBackground({ backgroundColor: $('text-background').value,
+    backgroundOpacity: Number($('text-background-opacity').value) / 100 });
   // Undefined defaults preserve annotations made before formatting was added.
   return { fontSize, color: $('text-color').value,
+    backgroundColor: background.color === 'none' ? undefined : background.color,
+    backgroundOpacity: background.opacity === 1 ? undefined : background.opacity,
     fontFamily: $('text-font').value === 'sans-serif' ? undefined : $('text-font').value,
     textAlign: $('text-align').value === 'left' ? undefined : $('text-align').value,
     ...Object.fromEntries(['bold', 'italic', 'underline'].map(style =>
@@ -900,6 +906,10 @@ function fitText(annotation) {
   }
   return moveText(ctx, annotation, viewport, 0, 0);
 }
+function resetTextBackgroundSettings() {
+  $('text-background').value = '#000000';
+  $('text-background-opacity').value = '0'; $('text-background-opacity-value').value = '0%';
+}
 function enableTextInsertion() {
   if (busy || stroke || annotationDrag || pageDrag || !model.active) return;
   if (textEnabled || textEdit || selectedText()) {
@@ -907,6 +917,7 @@ function enableTextInsertion() {
   }
   if (!finishTextEdit()) return;
   previewMenuOpen = true;
+  resetTextBackgroundSettings();
   textEnabled = true; penEnabled = false; selectedAnnotationId = null;
   resetPreviewMenu(); activePreviewMenu = 'text'; refreshAnnotationHandles(); updateControls();
   status('紙面をクリックしてテキストを1つ配置してください。Escで配置を終了します。');
@@ -942,6 +953,9 @@ function positionTextEditor() {
   const { editor, draft } = textEdit;
   const layout = textLayout($('ink-canvas').getContext('2d'), draft, viewport);
   const scale = $('ink-canvas').getBoundingClientRect().width / viewport.width;
+  const background = textBackground(draft);
+  const backgroundFill = background.color === 'none' ? 'transparent'
+    : `rgb(${background.color === '#ffffff' ? '255 255 255' : '0 0 0'} / ${background.opacity})`;
   // Match the PDF font and explicit line breaks; never introduce browser wrapping.
   Object.assign(editor.style, { left: `${layout.x * scale}px`, top: `${layout.y * scale}px`,
     width: `${Math.max(layout.contentWidth * scale + 2, draft.text ? 0 : 60)}px`,
@@ -951,6 +965,8 @@ function positionTextEditor() {
     fontFamily: textFontFamily(draft.fontFamily), fontWeight: draft.bold ? '700' : '400',
     fontStyle: draft.italic ? 'italic' : 'normal', textDecoration: draft.underline ? 'underline' : 'none',
     textAlign: draft.textAlign || 'left',
+    backgroundImage: `linear-gradient(${backgroundFill}, ${backgroundFill})`,
+    backgroundSize: `${layout.width * scale}px ${layout.height * scale}px`, backgroundRepeat: 'no-repeat',
     transform: `rotate(${layout.angle}rad)` });
 }
 
@@ -986,7 +1002,7 @@ function startTextEdit(annotation, isNew = false) {
   editor.spellcheck = false;
   editor.setAttribute('aria-label', 'テキストボックス');
   editor.setAttribute('aria-describedby', 'text-edit-hint');
-  editor.setAttribute('aria-keyshortcuts', 'F2 Control+b Control+i Control+u Control+ArrowUp Control+ArrowDown Escape');
+  editor.setAttribute('aria-keyshortcuts', 'F2 Control+b Control+i Control+u Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight Escape');
   textEdit = { pageId: model.activeId, original: isNew ? null : annotation, draft: annotation, editor };
   editor.onTextSelectionChange = syncTextFormatControls;
   editor.addEventListener('input', updateTextDraft);
@@ -1083,20 +1099,43 @@ function syncTextFormatControls() {
   const runs = textEdit ? anchorRuns : selectedTexts().flatMap(item => styledRuns(textFormatSession?.previews.get(item.id) || item));
   $('text-size').value = style.fontSize; $('text-color').value = style.color;
   $('text-font').value = style.fontFamily; $('text-align').value = style.textAlign;
+  const background = textBackground(annotation);
+  $('text-background').value = background.color;
+  $('text-background-opacity').value = Math.round(background.opacity * 100);
+  $('text-background-opacity-value').value = `${$('text-background-opacity').value}%`;
   for (const key of ['bold', 'italic', 'underline']) {
     const mixed = runs.some(run => run.style[key] !== style[key]);
     $(`text-${key}`).setAttribute('aria-pressed', mixed ? 'mixed' : String(style[key]));
   }
 }
 function previewTextFormatting(patch = textSettings(), relativeDelta) {
+  const backgroundPatch = typeof patch !== 'function' && ('backgroundColor' in patch || 'backgroundOpacity' in patch);
+  const relativeBackground = backgroundPatch && relativeDelta !== undefined;
+  let backgroundDelta;
+  if (relativeBackground) {
+    const annotations = textEdit ? [textEdit.editor.getAnnotation?.() || textEdit.draft] : selectedTexts();
+    const opacities = annotations.map(textBackground).filter(item => item.color !== 'none').map(item => item.opacity * 100);
+    if (!opacities.length) return;
+    backgroundDelta = Math.max(-Math.min(...opacities), Math.min(100 - Math.max(...opacities), relativeDelta));
+    if (Math.abs(backgroundDelta) < 1e-8) return;
+  }
+  const applyBackground = annotation => {
+    const background = textBackground(annotation);
+    if (relativeBackground && background.color === 'none') return annotation;
+    return formatTextBackground(annotation, relativeBackground
+      ? { backgroundOpacity: Number((background.opacity + backgroundDelta / 100).toFixed(12)) } : patch);
+  };
   if (textEdit) {
     const { start, end } = textFormatRange();
-    if (start === end) { status('書式を変更する文字を選択してください。'); syncTextFormatControls(); return; }
+    if (start === end && !backgroundPatch) { status('書式を変更する文字を選択してください。'); syncTextFormatControls(); return; }
     try {
-      const draft = fitText(formatText(readTextDraft(), start, end, patch));
+      const current = readTextDraft();
+      const draft = fitText(backgroundPatch ? applyBackground(current) : formatText(current, start, end, patch));
       textEdit.draft = draft;
       textEdit.editor.setCustomValidity('');
-      if (textEdit.editor.setAnnotation) textEdit.editor.setAnnotation(draft);
+      if (backgroundPatch && textEdit.editor.setBackground) textEdit.editor.setBackground({
+        backgroundColor: draft.backgroundColor, backgroundOpacity: draft.backgroundOpacity });
+      else if (textEdit.editor.setAnnotation) textEdit.editor.setAnnotation(draft);
       else textEdit.editor.value = draft.text;
       positionTextEditor(); syncTextFormatControls();
     } catch (error) { status(error.message, 'error'); syncTextFormatControls(); }
@@ -1106,7 +1145,7 @@ function previewTextFormatting(patch = textSettings(), relativeDelta) {
   try {
     textFormatSession ||= { originals: selectedTexts(), anchor: selectedText(), previews: new Map() };
     const { originals, anchor, previews } = textFormatSession;
-    const relativeSize = relativeDelta !== undefined || (originals.length > 1 && typeof patch !== 'function' && 'fontSize' in patch);
+    const relativeSize = !backgroundPatch && (relativeDelta !== undefined || (originals.length > 1 && typeof patch !== 'function' && 'fontSize' in patch));
     let delta;
     if (relativeSize) {
       const anchorSize = styledRuns(anchor)[0]?.style.fontSize ?? textStyle(anchor).fontSize;
@@ -1118,7 +1157,7 @@ function previewTextFormatting(patch = textSettings(), relativeDelta) {
     const candidates = originals.map(original => {
       const current = previews.get(original.id) || original;
       const base = relativeSize ? original : current;
-      return fitText(formatText(base, 0, base.text.length,
+      return fitText(backgroundPatch ? applyBackground(base) : formatText(base, 0, base.text.length,
         relativeSize ? style => ({ fontSize: style.fontSize + delta }) : patch, true));
     });
     // Validate every box before showing any part of the operation.
@@ -1211,12 +1250,18 @@ for (const id of ['pen-color', 'pen-width', 'pen-transparency']) {
   });
   $(id).addEventListener('blur', finishAnnotationFormatting);
 }
-for (const id of ['text-color', 'text-size', 'text-font', 'text-align']) {
-  const property = { 'text-color': 'color', 'text-size': 'fontSize', 'text-font': 'fontFamily', 'text-align': 'textAlign' }[id];
+for (const id of ['text-color', 'text-size', 'text-font', 'text-align', 'text-background', 'text-background-opacity']) {
+  const property = { 'text-color': 'color', 'text-size': 'fontSize', 'text-font': 'fontFamily', 'text-align': 'textAlign',
+    'text-background': 'backgroundColor', 'text-background-opacity': 'backgroundOpacity' }[id];
   const preview = () => {
-    const value = id === 'text-size' ? Number($(id).value) : $(id).value;
+    const value = id === 'text-size' ? Number($(id).value)
+      : id === 'text-background-opacity' ? Number($(id).value) / 100 : $(id).value;
     if (id === 'text-size' && (!Number.isFinite(value) || value < 8 || value > 96)) {
       status('文字サイズは8〜96ptで指定してください。', 'error'); return;
+    }
+    if (id === 'text-background-opacity') {
+      if (!Number.isFinite(value) || value < 0 || value > 1) return;
+      $('text-background-opacity-value').value = `${$(id).value}%`;
     }
     previewTextFormatting({ [property]: value });
     if (textFormatSession) textFormatSession.control = { id, value: String($(id).value) };
@@ -1232,6 +1277,24 @@ for (const style of ['bold', 'italic', 'underline']) {
   const button = $(`text-${style}`);
   button.addEventListener('click', () => {
     toggleTextStyle(style);
+  });
+}
+function selectTextSettingsTab(name) {
+  finishAnnotationFormatting();
+  for (const tab of ['characters', 'background']) {
+    const selected = tab === name;
+    $(`text-tab-${tab}`).setAttribute('aria-selected', String(selected));
+    $(`text-tab-${tab}`).tabIndex = selected ? 0 : -1;
+    $(tab === 'characters' ? 'text-character-settings' : 'text-background-settings').hidden = !selected;
+  }
+}
+for (const name of ['characters', 'background']) {
+  $(`text-tab-${name}`).addEventListener('click', () => selectTextSettingsTab(name));
+  $(`text-tab-${name}`).addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault(); event.stopPropagation();
+    const next = event.key === 'Home' ? 'characters' : event.key === 'End' ? 'background' : name === 'characters' ? 'background' : 'characters';
+    selectTextSettingsTab(next); $(`text-tab-${next}`).focus({ preventScroll: true });
   });
 }
 function toggleTextStyle(style) {
@@ -1263,12 +1326,14 @@ function handleTextShortcut(event) {
   if ((!event.ctrlKey && !event.metaKey) || event.shiftKey) return false;
   const style = { b: 'bold', i: 'italic', u: 'underline' }[event.key.toLowerCase()];
   const step = event.key === 'ArrowUp' ? 1 : event.key === 'ArrowDown' ? -1 : 0;
-  if (!style && !step) return false;
+  const opacityStep = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+  if (!style && !step && !opacityStep) return false;
   event.preventDefault(); event.stopPropagation();
   if (style) { if (!event.repeat) toggleTextStyle(style); }
   else {
     finishAnnotationFormatting();
-    if (textEdit) previewTextFormatting(current => ({ fontSize: Math.max(8, Math.min(96, current.fontSize + step)) }));
+    if (opacityStep) previewTextFormatting({ backgroundOpacity: 0 }, opacityStep);
+    else if (textEdit) previewTextFormatting(current => ({ fontSize: Math.max(8, Math.min(96, current.fontSize + step)) }));
     else previewTextFormatting({}, step);
     finishAnnotationFormatting();
   }
@@ -1368,12 +1433,12 @@ function refreshAnnotationHandles() {
     if (isText) button.dataset.textId = annotation.id;
     button.setAttribute('aria-label', isText ? `テキストを移動: ${annotation.text}` : annotation.tool === 'watermark' ? `透かしを選択・移動: ${annotation.text}` : '描画を選択・移動');
     button.setAttribute('aria-pressed', String(!!selected));
-    button.title = 'クリックまたはF2で内容を編集。Ctrl+B/I/Uで太字・斜体・下線、Ctrl+↑/↓でサイズ変更。ドラッグ・方向キーで移動、Deleteで削除。';
+    button.title = 'クリックまたはF2で内容を編集。Ctrl+B/I/Uで太字・斜体・下線、Ctrl+↑/↓でサイズ変更、Ctrl+←/→で背景の不透明度を変更。ドラッグ・方向キーで移動、Deleteで削除。';
     if (isText) button.title += ' Shift＋クリックで追加選択・解除。複数選択中はダブルクリックで個別編集。';
     if (!isText) button.title = 'クリックで選択。ドラッグで移動。方向キーで1pt、Shift＋方向キーで10pt移動。Deleteで削除。';
     const isStroke = !isText && annotation.tool !== 'watermark';
     if (isStroke) button.title += ' Shift＋クリックで追加選択・解除。Ctrl＋↑／↓で太さ、Ctrl＋←／→で透明度を相対変更。Ctrl＋Shift＋↑／↓で描画を拡大・縮小。';
-    button.setAttribute('aria-keyshortcuts', `${isText ? 'F2 Control+b Control+i Control+u Control+ArrowUp Control+ArrowDown ' : isStroke ? 'Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight Control+Shift+ArrowUp Control+Shift+ArrowDown ' : ''}Delete ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown`);
+    button.setAttribute('aria-keyshortcuts', `${isText ? 'F2 Control+b Control+i Control+u Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight ' : isStroke ? 'Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight Control+Shift+ArrowUp Control+Shift+ArrowDown ' : ''}Delete ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown`);
     positionAnnotationHandle(button, annotationPreview(annotation));
     if (existing) continue;
     const currentText = () => pageAnnotations().find(item => item.id === button.dataset.annotationId);
