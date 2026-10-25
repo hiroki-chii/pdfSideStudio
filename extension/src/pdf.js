@@ -151,6 +151,36 @@ export function moveStroke(stroke, viewport, dx, dy) {
   return { ...stroke, points: stroke.points.map(([x, y]) => [x + offset[0] - origin[0], y + offset[1] - origin[1]]) };
 }
 
+export function scaleStrokes(strokes, viewport, factor) {
+  if (!strokes.length || !Number.isFinite(factor) || factor <= 0) return strokes;
+  const bounds = strokes.map(stroke => {
+    const layout = strokeLayout(stroke, viewport), radius = stroke.width * viewport.scale / 2;
+    return { left: layout.left + radius, right: layout.right - radius,
+      top: layout.top + radius, bottom: layout.bottom - radius, radius };
+  });
+  const left = Math.min(...bounds.map(b => b.left)), right = Math.max(...bounds.map(b => b.right));
+  const top = Math.min(...bounds.map(b => b.top)), bottom = Math.max(...bounds.map(b => b.bottom));
+  const extent = Math.max(right - left, bottom - top);
+  if (extent < 1e-8) return strokes;
+  const cx = (left + right) / 2, cy = (top + bottom) / 2;
+  let maximum = Infinity;
+  for (const b of bounds) {
+    for (const [value, center, size] of [[b.left, cx, viewport.width], [b.right, cx, viewport.width],
+      [b.top, cy, viewport.height], [b.bottom, cy, viewport.height]]) {
+      const distance = value - center;
+      if (distance > 1e-8) maximum = Math.min(maximum, (size - b.radius - center) / distance);
+      else if (distance < -1e-8) maximum = Math.min(maximum, (b.radius - center) / distance);
+    }
+  }
+  // Keep the entire selection on the paper and its longest side at least 1 PDF point.
+  factor = Math.max(Math.min(1, viewport.scale / extent), Math.min(factor, Math.max(1, maximum)));
+  if (Math.abs(factor - 1) < 1e-8) return strokes;
+  return strokes.map(stroke => ({ ...stroke, points: stroke.points.map(point => {
+    const [x, y] = viewport.convertToViewportPoint(...point);
+    return viewport.convertToPdfPoint(cx + (x - cx) * factor, cy + (y - cy) * factor);
+  }) }));
+}
+
 function paintText(ctx, annotation, viewport) {
   const layout = textLayout(ctx, annotation, viewport);
   ctx.save();

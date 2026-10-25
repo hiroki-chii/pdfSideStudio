@@ -25,7 +25,7 @@ function setup(tool) {
   const context = vm.createContext({ $, document: {
     addEventListener(type, handler, capture) { documentHandlers[type] = { handler, capture }; },
   }, previewMenuOpen: true, penEnabled: tool === 'pen', textEnabled: tool === 'text',
-  busy: false, stroke: null, annotationDrag: null, pageDrag: null, selectedAnnotationId: null, selectedStrokeIds: new Set(),
+  busy: false, stroke: null, annotationDrag: null, pageDrag: null, selectedAnnotationId: null, selectedStrokeIds: new Set(), selectedTextIds: new Set(),
   activePreviewMenu: tool, textEdit: null, viewport: {},
   model: { activeId: 'page', active: { rotation: 0, strokes: [] },
     update() { calls.push('save-stroke'); } },

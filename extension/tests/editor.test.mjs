@@ -5,7 +5,7 @@ import { PDFDocument, PDFName, PDFNumber, degrees, rgb } from 'pdf-lib';
 import { createCanvas } from '@napi-rs/canvas';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { EditorModel, MAX_PAGES, normalizeRotation, safeFilename } from '../src/model.js';
-import { buildPdf, imagePlacement, paintOverlay, textLayout, moveText, strokeLayout, moveStroke, watermarkLayout, moveWatermark } from '../src/pdf.js';
+import { buildPdf, imagePlacement, paintOverlay, textLayout, moveText, strokeLayout, moveStroke, scaleStrokes, watermarkLayout, moveWatermark } from '../src/pdf.js';
 
 test('watermark movement follows viewport directions, clamps bounds and restores through history', async () => {
   const ctx = createCanvas(600, 800).getContext('2d');
@@ -255,6 +255,41 @@ test('stroke movement preserves all points/styles and follows screen directions 
   } finally { await preview.loadingTask.destroy(); }
 });
 
+test('stroke scaling preserves aspect ratio, center and styles at every rotation and zoom', async () => {
+  const doc = await PDFDocument.create(); doc.addPage([600, 800]);
+  const preview = await pdfjs.getDocument({ data: await doc.save() }).promise;
+  try {
+    const page = await preview.getPage(1);
+    for (const rotation of [0, 90, 180, 270]) for (const scale of [0.5, 1, 2]) {
+      const viewport = page.getViewport({ scale, rotation });
+      for (const tool of [undefined, 'pen', 'line', 'ellipse', 'rectangle']) {
+        const original = { tool, width: 4, opacity: 0.3, color: '#ff0000', points: [[100, 120], [140, 170], [200, 220]] };
+        const [resized] = scaleStrokes([original], viewport, 1.1);
+        assert.deepEqual({ ...resized, points: original.points }, original);
+        for (let i = 0; i < original.points.length; i++) {
+          assert.ok(Math.abs(resized.points[i][0] - (150 + (original.points[i][0] - 150) * 1.1)) < 1e-8);
+          assert.ok(Math.abs(resized.points[i][1] - (170 + (original.points[i][1] - 170) * 1.1)) < 1e-8);
+        }
+        const before = strokeLayout(original, viewport), after = strokeLayout(resized, viewport);
+        assert.ok(Math.abs(after.width - 4 * scale - (before.width - 4 * scale) * 1.1) < 1e-8);
+        assert.ok(Math.abs(after.height - 4 * scale - (before.height - 4 * scale) * 1.1) < 1e-8);
+      }
+    }
+  } finally { await preview.loadingTask.destroy(); }
+});
+
+test('stroke scaling ignores a single dot and scales multiple dots together without changing their widths', () => {
+  const viewport = { width: 200, height: 200, scale: 1,
+    convertToViewportPoint: (x, y) => [x, y], convertToPdfPoint: (x, y) => [x, y] };
+  const single = [{ width: 4, points: [[50, 50]] }];
+  assert.equal(scaleStrokes(single, viewport, 1.1), single);
+  const pair = [...single, { width: 8, points: [[100, 100]] }];
+  const resized = scaleStrokes(pair, viewport, 1.1);
+  assert.ok(Math.abs(resized[1].points[0][0] - resized[0].points[0][0] - 55) < 1e-8);
+  assert.equal(resized[0].width, 4); assert.equal(resized[1].width, 8);
+  assert.deepEqual(pair[0].points, [[50, 50]]);
+});
+
 test('stroke bounds include line width, dots and the rendered shape endpoints', () => {
   const viewport = { scale: 2, width: 200, height: 200,
     convertToViewportPoint: (x, y) => [x * 2, y * 2], convertToPdfPoint: (x, y) => [x / 2, y / 2] };
@@ -294,6 +329,9 @@ for (const rotation of [0, 90, 180, 270]) for (const userUnit of [1, 2]) {
     const viewport = pdfPage.getViewport({ scale: 1, rotation });
     record.strokes[0] = moveStroke(record.strokes[0], viewport, 7, -9);
     record.strokes[2] = moveStroke(record.strokes[2], viewport, -4, 6);
+    const resizedInk = scaleStrokes(record.strokes.filter(item => item.tool !== 'text'), viewport, 1 / 1.1);
+    let inkIndex = 0;
+    record.strokes = record.strokes.map(item => item.tool === 'text' ? item : resizedInk[inkIndex++]);
     record.watermark = moveWatermark(createCanvas(1, 1).getContext('2d'), record.watermark, viewport, 12, -15);
     const expected = createCanvas(viewport.width, viewport.height);
     const overlay = createCanvas(viewport.width, viewport.height);

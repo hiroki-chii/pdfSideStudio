@@ -4,19 +4,20 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { createCanvas } from '@napi-rs/canvas';
 import { EditorModel } from '../src/model.js';
-import { textFont, textFontFamily, textLayout, moveText, paintOverlay } from '../src/pdf.js';
+import { textFont, textFontFamily, textLayout, moveText, moveStroke, strokeLayout, paintOverlay } from '../src/pdf.js';
 import { styledRuns, textStyle, formatText, replaceText } from '../src/text-format.js';
 
 const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
 const slice = (start, end) => app.slice(app.indexOf(start), app.indexOf(end));
 const script = [
-  slice('function selectedText()', '\nfunction selectedAnnotation()'),
-  slice('function selectAnnotation(', '\nfunction enableTextInsertion()'),
+  slice('function enableSelection(', '\nfunction togglePreviewMenu('),
+  slice('function selectedText()', '\nfunction enableTextInsertion()'),
   slice('function enableTextInsertion()', "\n$('open-text').addEventListener"),
   slice('function togglePreviewMenu(', "\n$('open-select').addEventListener"),
   slice('function focusSelectedAnnotation()', "\n$('update-text').addEventListener"),
   slice('function positionTextEditor()', '\n// Commit before toolbar/page/export'),
   slice('function textFormatRange()', '\nfunction deleteSelectedAnnotation()'),
+  slice('function moveSelectedAnnotation(', '\nfunction refreshAnnotationHandles()'),
 ].join('\n');
 
 test('a text click edits without a menu, while a drag only moves the text', () => {
@@ -55,7 +56,7 @@ function setup() {
   const viewport = { width: 600, height: 800, scale: 1, rotation: 0,
     convertToPdfPoint: (x, y) => [x, y], convertToViewportPoint: (x, y) => [x, y] };
   const errors = [];
-  const context = vm.createContext({ $, model, viewport, textLayout, moveText, textFontFamily,
+  const context = vm.createContext({ $, model, viewport, textLayout, moveText, moveStroke, strokeLayout, paintOverlay, textFontFamily,
     styledRuns, textStyle, formatText, replaceText,
     createTextEditor(annotation) {
       const editor = node(); editor.value = annotation.text;
@@ -63,7 +64,8 @@ function setup() {
       editor.setAnnotation = value => { editor.value = value.text; };
       return editor;
     },
-    busy: false, selectedAnnotationId: 'text', selectedStrokeIds: new Set(), annotationFormatPreview: null, strokeFormatSession: null, textEdit: null,
+    busy: false, selectedAnnotationId: 'text', selectedStrokeIds: new Set(), selectedTextIds: new Set(),
+    annotationFormatPreview: null, strokeFormatSession: null, textFormatSession: null, textEdit: null,
     textEnabled: false, penEnabled: false, activePreviewMenu: 'text',
     previewMenuOpen: false, stroke: null, annotationDrag: null, pageDrag: null,
     previewMenus: ['rotation', 'pen', 'watermark'], previewZoom: 1, minPreviewZoom: 0.5, maxPreviewZoom: 4,
@@ -141,6 +143,229 @@ test('Escape commits existing and new text edits, retains formatting and focuses
 
 const key = (value, ctrlKey = false, extra = {}) => ({ key: value, ctrlKey,
   preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; }, ...extra });
+
+function multipleSetup(firstSize = 24, secondSize = 36) {
+  const env = setup(), { context, model, original } = env;
+  original.text = 'Text'; original.fontSize = firstSize;
+  const other = { ...original, id: 'other', fontSize: secondSize, color: '#004488', points: [[250, 350]] };
+  const unselected = { ...original, id: 'unselected', points: [[60, 600]] };
+  model.commit([{ ...model.active, strokes: [original, other, unselected] }, { id: 'other-page', strokes: [original] }]);
+  context.selectAnnotation(original); context.selectAnnotation(other, { toggle: true });
+  return { ...env, other, unselected };
+}
+
+function installHandles({ context, $ }) {
+  const handles = [];
+  context.document.createElement = () => ({ style: {}, dataset: {}, handlers: {}, attributes: {},
+    classList: { toggle(name, value) { this[name] = value; } },
+    setAttribute(key, value) { this.attributes[key] = value; },
+    addEventListener(type, handler) { this.handlers[type] = handler; },
+    remove() { handles.splice(handles.indexOf(this), 1); }, focus() {},
+    setPointerCapture() { this.captured = true; }, hasPointerCapture() { return !!this.captured; },
+    releasePointerCapture() { this.captured = false; },
+  });
+  $('text-handles').querySelectorAll = () => handles;
+  $('text-handles').append = handle => handles.push(handle);
+  $('ink-canvas').getBoundingClientRect = () => ({ left: 0, top: 0, width: 600, height: 800 });
+  vm.runInContext(slice('function refreshAnnotationHandles()', '\nfunction pdfPoint('), context);
+  context.refreshAnnotationHandles();
+  return handles;
+}
+
+const pointer = (x, y, extra = {}) => ({ button: 0, isPrimary: true, pointerId: 1,
+  clientX: x, clientY: y, preventDefault() {}, ...extra });
+
+test('text modifier clicks toggle selection, show each selected handle and preserve history', () => {
+  for (const modifier of ['shiftKey', 'ctrlKey', 'metaKey']) {
+    const env = multipleSetup(), { context, model, original, other } = env;
+    context.selectAnnotation(original);
+    const handles = installHandles(env), second = handles.find(item => item.dataset.annotationId === other.id);
+    const history = model.past.length; model.future.push(model.snapshot());
+    second.handlers.pointerdown(pointer(250, 350, { [modifier]: true }));
+    assert.equal(context.selectedTexts().length, 2);
+    assert.equal(context.textEdit, null); assert.equal(context.annotationDrag, null);
+    assert.ok(handles.slice(0, 2).every(item => item.attributes['aria-pressed'] === 'true'));
+    assert.equal(handles[2].attributes['aria-pressed'], 'false');
+    // Modifier double-clicks must never open an editor.
+    second.handlers.dblclick({ [modifier]: true }); assert.equal(context.textEdit, null);
+    second.handlers.click({ detail: 0, [modifier]: true });
+    assert.equal(context.selectedTexts().length, 1); assert.equal(context.selectedAnnotationId, original.id);
+    context.selectAnnotation(original, { toggle: true });
+    assert.equal(context.selectedTexts().length, 0); assert.equal(context.selectedAnnotationId, null);
+    assert.equal(model.past.length, history); assert.equal(model.future.length, 1);
+  }
+});
+
+test('group text formatting applies all properties atomically and leaves unselected boxes and pages intact', () => {
+  const { context, $, model, original, other, unselected } = multipleSetup();
+  const otherPage = model.pages[1], history = model.past.length;
+  for (const [id, value, property] of [
+    ['text-color', '#cc2200', 'color'], ['text-font', 'serif', 'fontFamily'], ['text-align', 'center', 'textAlign'],
+  ]) {
+    $(id).value = value; $(id).handlers.input();
+    assert.equal(model.past.length, history + ['color', 'fontFamily', 'textAlign'].indexOf(property));
+    assert.ok([...context.textFormatSession.previews.values()].every(item => item[property] === value));
+    $(id).handlers.change(); $(id).handlers.blur();
+    assert.ok(model.active.strokes.slice(0, 2).every(item => item[property] === value));
+  }
+  for (const style of ['bold', 'italic', 'underline']) $(`text-${style}`).handlers.click();
+  assert.ok(model.active.strokes.slice(0, 2).every(item => item.bold && item.italic && item.underline));
+  assert.equal(model.active.strokes[2], unselected); assert.equal(model.pages[1], otherPage);
+  assert.equal(model.past.length, history + 6);
+  for (let index = 0; index < 6; index++) model.undo();
+  assert.equal(model.active.strokes[0], original); assert.equal(model.active.strokes[1], other);
+  for (let index = 0; index < 6; index++) model.redo();
+  context.selectAnnotation(model.active.strokes[1], { preserve: true });
+  assert.equal(context.selectedTexts().length, 2);
+  assert.equal($('text-bold').getAttribute('aria-pressed'), 'true');
+});
+
+test('group size input uses the original baseline, preserves size differences and commits once', () => {
+  const { context, $, model } = multipleSetup();
+  const history = model.past.length;
+  for (const value of ['37', '40']) { $('text-size').value = value; $('text-size').handlers.input(); }
+  assert.deepEqual([...context.textFormatSession.previews.values()].map(item => item.fontSize), [28, 40]);
+  assert.deepEqual(model.active.strokes.slice(0, 2).map(item => item.fontSize), [24, 36]);
+  assert.equal(model.past.length, history);
+  $('text-size').handlers.change(); $('text-size').handlers.blur();
+  assert.deepEqual(model.active.strokes.slice(0, 2).map(item => item.fontSize), [28, 40]);
+  assert.equal(model.past.length, history + 1);
+  context.handleTextShortcut(key('ArrowUp', true));
+  assert.deepEqual(model.active.strokes.slice(0, 2).map(item => item.fontSize), [29, 41]);
+  model.undo(); assert.deepEqual(model.active.strokes.slice(0, 2).map(item => item.fontSize), [28, 40]);
+  model.redo(); assert.deepEqual(model.active.strokes.slice(0, 2).map(item => item.fontSize), [29, 41]);
+});
+
+test('group size inputs and shortcuts stop at the first limit for either anchor and reverse together', () => {
+  for (const firstAnchor of [false, true]) for (const [sizes, input, expected, direction, reverse] of [
+    [[24, 36], '96', [84, 96], 'ArrowUp', 'ArrowDown'],
+    [[24, 36], '8', [8, 20], 'ArrowDown', 'ArrowUp'],
+  ]) {
+    const { context, $, model, original, other } = multipleSetup(...sizes);
+    context.selectAnnotation(firstAnchor ? original : other, { preserve: true });
+    $('text-size').value = input; $('text-size').handlers.input(); $('text-size').handlers.change();
+    assert.deepEqual(model.active.strokes.slice(0, 2).map(item => item.fontSize), expected);
+    assert.equal(Number($('text-size').value), expected[firstAnchor ? 0 : 1]);
+    const history = model.past.length; model.future.push(model.snapshot());
+    context.handleTextShortcut(key(direction, true));
+    assert.equal(model.past.length, history); assert.equal(model.future.length, 1);
+    $('text-size').value = input; $('text-size').handlers.change();
+    assert.deepEqual(model.active.strokes.slice(0, 2).map(item => item.fontSize), expected);
+    assert.equal(model.past.length, history); assert.equal(model.future.length, 1);
+    context.handleTextShortcut(key(reverse, true));
+    const step = reverse === 'ArrowUp' ? 1 : -1;
+    assert.deepEqual(model.active.strokes.slice(0, 2).map(item => item.fontSize), expected.map(size => size + step));
+  }
+});
+
+test('partial text sizes constrain the entire group and mixed style buttons toggle the selection consistently', () => {
+  const { context, $, model, original, other } = multipleSetup();
+  const rich = formatText(original, 1, 3, { fontSize: 95, bold: true });
+  model.update(new Set(['page']), page => ({ ...page, strokes: [rich, other, page.strokes[2]] }));
+  context.selectAnnotation(other, { preserve: true });
+  assert.equal($('text-bold').getAttribute('aria-pressed'), 'mixed');
+  context.handleTextShortcut(key('b', true));
+  assert.ok(model.active.strokes.slice(0, 2).every(item => styledRuns(item).every(run => run.style.bold)));
+  context.handleTextShortcut(key('b', true));
+  assert.ok(model.active.strokes.slice(0, 2).every(item => styledRuns(item).every(run => !run.style.bold)));
+  $('text-size').value = '60'; $('text-size').handlers.change();
+  assert.deepEqual(model.active.strokes.slice(0, 2).map(item => item.fontSize), [25, 37]);
+  assert.equal(styledRuns(model.active.strokes[0])[1].style.fontSize, 96);
+  const history = model.past.length;
+  context.handleTextShortcut(key('ArrowUp', true)); assert.equal(model.past.length, history);
+  context.handleTextShortcut(key('ArrowDown', true));
+  assert.equal(styledRuns(model.active.strokes[0])[1].style.fontSize, 95);
+});
+
+test('returning the size input to its baseline preserves history and partial lower limits stop the whole group', () => {
+  const { context, $, model, original, other } = multipleSetup();
+  const history = model.past.length; model.future.push(model.snapshot());
+  for (const value of ['40', '36']) { $('text-size').value = value; $('text-size').handlers.input(); }
+  $('text-size').handlers.change();
+  assert.equal(model.past.length, history); assert.equal(model.future.length, 1);
+  const rich = formatText(original, 1, 3, { fontSize: 8 });
+  model.update(new Set(['page']), page => ({ ...page, strokes: [rich, other] }));
+  context.selectAnnotation(other, { preserve: true });
+  const boundaryHistory = model.past.length; model.future.push(model.snapshot());
+  context.handleTextShortcut(key('ArrowDown', true));
+  assert.equal(model.past.length, boundaryHistory); assert.equal(model.future.length, 1);
+  assert.equal(model.active.strokes[0], rich); assert.equal(model.active.strokes[1], other);
+  context.handleTextShortcut(key('ArrowUp', true));
+  assert.deepEqual(styledRuns(model.active.strokes[0]).map(run => run.style.fontSize), [25, 9, 25]);
+  assert.equal(model.active.strokes[1].fontSize, 37);
+});
+
+test('finishing a text draft commits the group preview before a selection change and individual editing clears the group', () => {
+  const { context, $, model, original, other } = multipleSetup();
+  const history = model.past.length;
+  $('text-color').value = '#cc2200'; $('text-color').handlers.input();
+  assert.equal(context.finishTextEdit(), true);
+  assert.equal(model.past.length, history + 1);
+  assert.ok(model.active.strokes.slice(0, 2).every(item => item.color === '#cc2200'));
+  context.selectAnnotation(model.active.strokes[0], { preserve: true });
+  assert.equal(context.selectedTexts().length, 2);
+  context.startTextEdit(model.active.strokes[0]);
+  assert.equal(context.selectedTexts().length, 1); assert.equal(context.selectedTextIds.size, 1);
+  context.finishTextEdit(true); context.selectAnnotation(model.active.strokes[1], { toggle: true });
+  assert.equal(context.selectedTexts().length, 2);
+  const shape = { id: 'shape', tool: 'line', width: 3, color: '#222222', points: [[10, 10], [20, 20]] };
+  model.update(new Set(['page']), page => ({ ...page, strokes: [...page.strokes, shape] }));
+  context.selectAnnotation(shape, { toggle: true });
+  assert.equal(context.selectedTexts().length, 0); assert.equal(context.selectedTextIds.size, 0);
+  context.selectAnnotation(model.active.strokes[0], { toggle: true });
+  assert.equal(context.selectedStrokes().length, 0); assert.equal(context.selectedStrokeIds.size, 0);
+  assert.equal(context.selectedTexts().length, 1);
+  assert.equal(original.color, '#222222'); assert.equal(other.color, '#004488');
+});
+
+test('a failed fit rolls back the entire formatting preview and preserves Undo and Redo', () => {
+  const { context, $, model, original, other } = multipleSetup();
+  other.text = 'W'.repeat(10);
+  context.selectAnnotation(original, { preserve: true });
+  const history = model.past.length; model.future.push(model.snapshot());
+  $('text-size').value = '80'; $('text-size').handlers.input(); $('text-size').handlers.change();
+  assert.equal(model.active.strokes[0], original); assert.equal(model.active.strokes[1], other);
+  assert.equal(model.past.length, history); assert.equal(model.future.length, 1);
+  assert.equal(context.textFormatSession, null); assert.equal(context.annotationFormatPreview, null);
+  assert.equal(Number($('text-size').value), original.fontSize);
+});
+
+test('group text movement, clicks, deletion and deselection preserve the selection and support atomic Undo', () => {
+  const env = multipleSetup(), { context, $, model, original, other, unselected } = env;
+  const handles = installHandles(env), second = handles.find(item => item.dataset.annotationId === other.id);
+  second.handlers.pointerdown(pointer(250, 350)); second.handlers.pointerup(pointer(250, 350));
+  assert.equal(context.textEdit, null); assert.equal(context.selectedTexts().length, 2);
+  context.handleTextShortcut(key('F2')); assert.equal(context.textEdit, null);
+  context.document.querySelectorAll = () => [];
+  vm.runInContext(slice('function updateControls()', '\nfunction refresh()'), context);
+  context.updateControls();
+  assert.equal($('text-menu-title').textContent, '選択したテキスト（2件）');
+  assert.equal($('update-text').disabled, true);
+  const history = model.past.length;
+  second.handlers.pointerdown(pointer(250, 350)); second.handlers.pointermove(pointer(270, 360));
+  assert.equal(model.active.strokes[0], original);
+  second.handlers.pointerup(pointer(270, 360));
+  assert.equal(model.past.length, history + 1);
+  assert.deepEqual(model.active.strokes.slice(0, 2).map(item => item.points[0]), [[80, 110], [270, 360]]);
+  model.undo(); assert.equal(model.active.strokes[0], original); assert.equal(model.active.strokes[1], other);
+  context.moveSelectedAnnotation(10000, 10000);
+  const [moved, movedOther] = model.active.strokes;
+  assert.ok(Math.abs((movedOther.points[0][0] - moved.points[0][0]) - 190) < 1e-8);
+  assert.ok(Math.abs((movedOther.points[0][1] - moved.points[0][1]) - 250) < 1e-8);
+  for (const item of [moved, movedOther]) {
+    const layout = textLayout($('ink-canvas').getContext('2d'), item, context.viewport);
+    assert.ok(layout.right <= 600 + 1e-8 && layout.bottom <= 800 + 1e-8);
+  }
+  model.undo();
+  context.refresh = () => context.updateControls();
+  vm.runInContext(slice('function deleteSelectedAnnotation()', "\non('delete-text'"), context);
+  context.deleteSelectedAnnotation(); assert.deepEqual(model.active.strokes, [unselected]);
+  model.undo(); assert.equal(model.active.strokes[0], original); assert.equal(model.active.strokes[1], other);
+  context.selectAnnotation(original); context.selectAnnotation(other, { toggle: true });
+  context.enableSelection(); assert.equal(context.selectedTextIds.size, 0);
+  context.selectAnnotation(original); context.handleTextShortcut(key('ArrowUp', true));
+  assert.equal(model.active.strokes[1], other);
+});
 
 test('F2 edits selected text; shortcuts affect only selected characters and survive Escape and re-editing', () => {
   const { context, model, original } = setup();

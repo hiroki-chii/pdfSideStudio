@@ -6,7 +6,7 @@ import { createCanvas } from '@napi-rs/canvas';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { EditorModel } from '../src/model.js';
-import { paintOverlay, strokeLayout, moveStroke, buildPdf, imagePlacement } from '../src/pdf.js';
+import { paintOverlay, strokeLayout, moveStroke, scaleStrokes, buildPdf, imagePlacement } from '../src/pdf.js';
 
 const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
 const slice = (start, end) => app.slice(app.indexOf(start), app.indexOf(end));
@@ -42,12 +42,13 @@ function setup(tool = 'pen', opacity = 0.75) {
   const watermark = { text: 'DRAFT', color: '#736c90', opacity: 0.2 };
   model.commit([{ id: 'page', strokes: [original, other, text], watermark },
     { id: 'other-page', strokes: [other] }]);
-  const context = vm.createContext({ $, model, canvas, paintOverlay, strokeLayout, moveStroke,
+  const context = vm.createContext({ $, model, canvas, paintOverlay, strokeLayout, moveStroke, scaleStrokes,
     viewport: { width: 200, height: 200, scale: 1,
       convertToPdfPoint: (x, y) => [x, y], convertToViewportPoint: (x, y) => [x, y] },
     document: { querySelectorAll: selector => selector === 'button, input, select, textarea' ? [...nodes.values()] : [],
       addEventListener(type, handler) { documentHandlers[type] = handler; } },
-    busy: false, selectedAnnotationId: null, selectedStrokeIds: new Set(), annotationFormatPreview: null, strokeFormatSession: null, textEdit: null,
+    busy: false, selectedAnnotationId: null, selectedStrokeIds: new Set(), selectedTextIds: new Set(),
+    annotationFormatPreview: null, strokeFormatSession: null, textFormatSession: null, textEdit: null,
     textEnabled: false, penEnabled: false, activePreviewMenu: 'select', previewMenuOpen: false,
     stroke: null, annotationDrag: null, pageDrag: null,
     previewMenus: ['rotation', 'pen', 'watermark'], previewZoom: 1, minPreviewZoom: 0.5, maxPreviewZoom: 4,
@@ -379,13 +380,69 @@ test('shortcut limits and legacy opacity avoid redundant history and preserve Re
   }
 });
 
+test('Ctrl+Shift+Up/Down resize selected strokes without changing line styles and support Undo/Redo', () => {
+  for (const tool of [undefined, 'pen', 'line', 'ellipse', 'rectangle']) {
+    const { context, model, original, other, documentHandlers } = setup(tool);
+    if (tool === undefined) delete original.tool;
+    original.points = [[50, 50], [80, 80], [120, 90]];
+    vm.runInContext(slice("document.addEventListener('keydown', event => {", '\nlet resizeTimer;'), context);
+    const history = model.past.length, event = shortcut('ArrowUp', { shiftKey: true });
+    documentHandlers.keydown(event);
+    assert.equal(event.defaultPrevented && event.stopped, true);
+    const resized = model.active.strokes[0];
+    assert.deepEqual({ ...resized, points: original.points }, original);
+    for (let i = 0; i < original.points.length; i++) {
+      assert.ok(Math.abs(resized.points[i][0] - (85 + (original.points[i][0] - 85) * 1.1)) < 1e-8);
+      assert.ok(Math.abs(resized.points[i][1] - (70 + (original.points[i][1] - 70) * 1.1)) < 1e-8);
+    }
+    assert.equal(model.active.strokes[1], other); assert.equal(model.past.length, history + 1);
+    documentHandlers.keydown(shortcut('ArrowDown', { shiftKey: true }));
+    const restored = model.active.strokes[0];
+    for (let i = 0; i < original.points.length; i++) for (const axis of [0, 1]) {
+      assert.ok(Math.abs(restored.points[i][axis] - original.points[i][axis]) < 1e-8);
+    }
+    assert.equal(model.past.length, history + 2);
+    model.undo(); assert.equal(model.active.strokes[0], resized);
+    model.undo(); assert.equal(model.active.strokes[0], original);
+    model.redo(); assert.equal(model.active.strokes[0], resized);
+  }
+});
+
+test('group resizing preserves spacing and selection, stops at the paper edge and minimum size, and keeps Redo on no-op', () => {
+  const { context, model, original, other } = multipleSetup();
+  context.handlePenShortcut(shortcut('ArrowUp', { shiftKey: true }));
+  const [first, second] = model.active.strokes;
+  assert.ok(Math.abs((second.points[0][1] - first.points[0][1]) - 66) < 1e-8);
+  assert.equal(first.width, original.width); assert.equal(second.width, other.width);
+  assert.equal(first.opacity, original.opacity); assert.equal(second.opacity, other.opacity);
+  assert.equal(context.selectedStrokes().length, 2);
+  for (let i = 0; i < 100; i++) context.handlePenShortcut(shortcut('ArrowUp', { shiftKey: true, repeat: true }));
+  const atMaximum = model.pages, pastAtMaximum = model.past.length;
+  model.future.push(model.snapshot());
+  context.handlePenShortcut(shortcut('ArrowUp', { shiftKey: true }));
+  assert.equal(model.pages, atMaximum); assert.equal(model.past.length, pastAtMaximum); assert.equal(model.future.length, 1);
+  for (const item of model.active.strokes.slice(0, 2)) {
+    const bounds = strokeLayout(item, context.viewport);
+    assert.ok(bounds.left >= -1e-8 && bounds.top >= -1e-8 && bounds.right <= 200 + 1e-8 && bounds.bottom <= 200 + 1e-8);
+  }
+  for (let i = 0; i < 100; i++) context.handlePenShortcut(shortcut('ArrowDown', { shiftKey: true, repeat: true }));
+  const atMinimum = model.pages, pastAtMinimum = model.past.length;
+  model.future.push(model.snapshot());
+  context.handlePenShortcut(shortcut('ArrowDown', { shiftKey: true }));
+  assert.equal(model.pages, atMinimum); assert.equal(model.past.length, pastAtMinimum); assert.equal(model.future.length, 1);
+  context.enableSelection(); context.openPreviewMenu('pen');
+  assert.equal(context.handlePenShortcut(shortcut('ArrowUp', { shiftKey: true })), false);
+});
+
 test('pen shortcuts yield to text, editable fields, dialogs, IME and gestures in progress', () => {
   const { context, model, original } = setup();
   const history = model.past.length;
-  for (const extra of [{ ctrlKey: false }, { altKey: true }, { shiftKey: true },
+  assert.equal(context.handlePenShortcut(shortcut('ArrowLeft', { shiftKey: true })), false);
+  for (const extra of [{ ctrlKey: false }, { altKey: true },
     { isComposing: true }, { keyCode: 229 }, { defaultPrevented: true },
     { target: { closest: () => ({}) } }]) {
     assert.equal(context.handlePenShortcut(shortcut('ArrowUp', extra)), false);
+    assert.equal(context.handlePenShortcut(shortcut('ArrowUp', { ...extra, shiftKey: true })), false);
   }
   for (const flag of ['busy', 'stroke', 'annotationDrag', 'pageDrag', 'textEdit']) {
     context[flag] = true;
