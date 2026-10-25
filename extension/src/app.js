@@ -1,19 +1,20 @@
 import './style.css';
 import './theme.css';
-import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
-import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
-import { PDFDocument } from 'pdf-lib';
-import { zipSync } from 'fflate';
-import { EditorModel, safeFilename, MAX_FILE_BYTES, MAX_TOTAL_BYTES, MAX_PAGES, normalizeRotation } from './model.js';
-import { buildPdf, imagePlacement, paintOverlay, textFontFamily, textLayout, moveText, strokeLayout, moveStroke, scaleStrokes, watermarkLayout, moveWatermark } from './pdf.js';
+import { EditorModel, safeFilename, normalizeRotation } from './model.js';
+import { paintOverlay, textFontFamily, textLayout, moveText, strokeLayout, moveStroke, scaleStrokes, watermarkLayout, moveWatermark } from './pdf.js';
 import { createThemeController } from './theme.js';
-import { storePrintJob, deletePrintJob } from './print-job.js';
+import { storePrintJob, deletePrintJob, purgeLegacyPrintJobs } from './print-job.js';
 import { createFullscreenPreview } from './fullscreen-preview.js';
 import { styledRuns, textStyle, textBackground, formatTextBackground, formatText, replaceText } from './text-format.js';
 import { createTextEditor } from './text-editor.js';
+import { exportDocument } from './pdf-processor.js';
+import { createPageOverlay as createOverlay, createPrintPages } from './raster.js';
+import { download } from './download.js';
+import { readPdfSource, pdfErrorMessage } from './pdf-source.js';
+import { createToolHelp } from './tool-help.js';
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 const $ = id => document.getElementById(id);
+createToolHelp(document);
 let themeStorage;
 try { themeStorage = window.localStorage; } catch { /* Theme still works without storage. */ }
 createThemeController({ root: document.documentElement, button: $('theme-mode'),
@@ -88,7 +89,7 @@ function activeRequired() {
 
 function updateControls() {
   document.querySelectorAll('button, input, select, textarea').forEach(element => {
-    if (['help', 'close-help', 'theme-mode'].includes(element.id) || element.closest('#fullscreen-preview')) return;
+    if (['help', 'close-help', 'close-tool-help', 'theme-mode'].includes(element.id) || element.closest('#fullscreen-preview')) return;
     element.disabled = busy;
   });
   $('undo').disabled = busy || !model.past.length;
@@ -532,35 +533,17 @@ async function addFiles(files) {
   const errors = [];
   for (const file of files) {
     status(`${file.name} を読み込んでいます…`);
-    let preview = null;
-    let loading = null;
     try {
-      if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') throw new Error('PDFファイルを選択してください。');
-      if (file.size > MAX_FILE_BYTES) throw new Error('1ファイル50MBまでです。');
-      if ([...sources.values()].reduce((sum, s) => sum + s.size, 0) + file.size > MAX_TOTAL_BYTES) throw new Error('読み込み総量150MBを超えます。保存後にパネルを開き直してください。');
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const doc = await PDFDocument.load(bytes);
-      if (!doc.getPageCount()) throw new Error('ページが含まれていません。');
-      if (model.pages.length + added.length + doc.getPageCount() > MAX_PAGES) throw new Error(`${MAX_PAGES}ページを超えます。`);
-      loading = pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false,
-        cMapUrl: new URL('cmaps/', document.baseURI).href, cMapPacked: true,
-        standardFontDataUrl: new URL('standard_fonts/', document.baseURI).href,
-        wasmUrl: new URL('wasm/', document.baseURI).href,
-        useWasm: false, useWorkerFetch: false });
-      loading.onPassword = () => { loading.destroy(); };
-      preview = await loading.promise;
+      const source = await readPdfSource(file, {
+        usedBytes: [...sources.values()].reduce((sum, item) => sum + item.size, 0),
+        pageCount: model.pages.length + added.length,
+      });
       const sourceId = uid();
-      sources.set(sourceId, { document: doc, preview, name: file.name, size: file.size,
+      sources.set(sourceId, { ...source,
         number: sources.size + 1, color: sourceColors[sources.size % sourceColors.length] });
-      doc.getPages().forEach((page, index) => added.push({ id: uid(), sourceId, index, rotation: normalizeRotation(page.getRotation().angle), strokes: [], watermark: null }));
+      source.pages.forEach((page, index) => added.push({ id: uid(), sourceId, index, rotation: page.rotation, strokes: [], watermark: null }));
     } catch (error) {
-      await loading?.destroy().catch(() => {});
-      const message = /encrypt|password/i.test(error.message)
-        ? 'パスワード保護PDFには対応していません。'
-        : /parse|invalid|header|structure/i.test(error.message)
-          ? 'PDFを読み込めません。ファイルが破損していないか確認してください。'
-          : error.message;
-      errors.push(`${file.name}: ${message}`);
+      errors.push(`${file.name}: ${pdfErrorMessage(error)}`);
     }
   }
   if (added.length) {
@@ -578,53 +561,12 @@ function rotate(angle) {
   refresh(); status(all ? `${ids.size}ページを回転しました。` : '表示中のページを回転しました。', 'success');
 }
 
-async function createOverlay(record, source) {
-  const page = await source.preview.getPage(record.index + 1);
-  const base = page.getViewport({ scale: 1, rotation: record.rotation });
-  // Bound raster size for oversized engineering sheets. Original content stays vector.
-  const scale = Math.min(2, 4096 / Math.max(base.width, base.height));
-  const view = page.getViewport({ scale, rotation: record.rotation });
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.ceil(view.width); canvas.height = Math.ceil(view.height);
-  paintOverlay(canvas.getContext('2d'), record, view);
-  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-  if (!blob) throw new Error('書き込み画像を作成できませんでした。');
-  // Account for the rounding of physical canvas dimensions at its top/right edges.
-  const exact = { ...view, width: canvas.width, height: canvas.height,
-    convertToPdfPoint: (x, y) => view.convertToPdfPoint(x, y) };
-  return { bytes: new Uint8Array(await blob.arrayBuffer()), placement: imagePlacement(exact) };
-}
-
-function download(bytes, name, type) {
-  const url = URL.createObjectURL(new Blob([bytes], { type }));
-  const link = document.createElement('a'); link.href = url; link.download = name;
-  document.body.append(link); link.click(); link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
-
 async function printPdf() {
   if (!model.pages.length) return;
-  const pages = [];
-  for (const [index, record] of model.pages.entries()) {
-    status('印刷を準備中… ' + (index + 1) + ' / ' + model.pages.length);
-    const source = sources.get(record.sourceId);
-    const page = await source.preview.getPage(record.index + 1);
-    const base = page.getViewport({ scale: 1, rotation: record.rotation });
-    const view = page.getViewport({ scale: Math.min(2, 4096 / Math.max(base.width, base.height)), rotation: record.rotation });
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.ceil(view.width); canvas.height = Math.ceil(view.height);
-    await page.render({ canvasContext: canvas.getContext('2d'), viewport: view }).promise;
-    const overlay = document.createElement('canvas');
-    overlay.width = canvas.width; overlay.height = canvas.height;
-    paintOverlay(overlay.getContext('2d'), record, view);
-    canvas.getContext('2d').drawImage(overlay, 0, 0);
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-    if (!blob) throw new Error('印刷用の画像を作成できませんでした。');
-    pages.push({ blob, width: base.width, height: base.height });
-    canvas.width = canvas.height = overlay.width = overlay.height = 0;
-  }
+  const pages = await createPrintPages(model.pages, sources,
+    (done, total) => status(`印刷を準備中… ${done} / ${total}`));
   const id = uid();
-  await storePrintJob(id, { title: safeFilename($('output-name').value), pages, createdAt: Date.now() });
+  await storePrintJob(id, { title: safeFilename($('output-name').value), pages });
   try {
     const url = new URL('print.html', document.baseURI); url.searchParams.set('job', id);
     if (globalThis.chrome?.tabs?.create) await chrome.tabs.create({ url: url.href, active: true });
@@ -635,22 +577,18 @@ async function printPdf() {
 
 async function exportPdf() {
   const records = model.pages;
-  const bytes = await buildPdf(records, sources, createOverlay, (done, total) => status(`PDFを作成中… ${done} / ${total}`));
+  const bytes = await exportDocument('export', records, sources, createOverlay, $('output-name').value,
+    (done, total) => status(`PDFを作成中… ${done} / ${total}`));
   download(bytes, `${safeFilename($('output-name').value)}.pdf`, 'application/pdf');
   status(`${records.length}ページのPDFの保存を開始しました。`, 'success');
 }
 
 async function splitPdf() {
   const records = model.pages;
-  const files = {};
   const base = safeFilename($('output-name').value);
-  for (const [index, record] of records.entries()) {
-    status(`分割しています… ${index + 1} / ${records.length}`);
-    files[`${base}-${String(model.pages.indexOf(record) + 1).padStart(3, '0')}.pdf`] = await buildPdf([record], sources, createOverlay);
-    // Yield so progress paints even for small, unannotated PDFs.
-    await new Promise(resolve => setTimeout(resolve, 0));
-  }
-  download(zipSync(files, { level: 0 }), `${base}-pages.zip`, 'application/zip');
+  const bytes = await exportDocument('split', records, sources, createOverlay, base,
+    (done, total) => status(`分割しています… ${done} / ${total}`));
+  download(bytes, `${base}-pages.zip`, 'application/zip');
   status(`${records.length}個のPDFを含むZIPの保存を開始しました。`, 'success');
 }
 
@@ -1066,6 +1004,7 @@ function finishTextEdit(cancel = false) {
 
 // Commit before toolbar/page/export actions so they always see the latest text.
 document.addEventListener('pointerdown', event => {
+  if (event.target.closest('[data-tool-help], #tool-help-dialog')) return;
   // Blank space outside the paper also clears selection, while controls remain usable.
   if (event.button === 0 && event.isPrimary && !busy && !stroke && !annotationDrag && !pageDrag
     && (selectedAnnotationId || textEdit)
@@ -1092,7 +1031,7 @@ document.addEventListener('pointerdown', event => {
 }, true);
 // Dismiss menus on other outside clicks after the target handles its action.
 document.addEventListener('click', event => {
-  if (!previewMenuOpen || event.target.closest('.preview-menu, .preview-tool-button, .text-handle')) return;
+  if (!previewMenuOpen || event.target.closest('.preview-menu, .preview-tool-button, .text-handle, dialog')) return;
   previewMenuOpen = false;
   updateControls();
 });
@@ -1325,7 +1264,7 @@ function toggleTextStyle(style) {
 function handleTextShortcut(event) {
   if (busy || stroke || annotationDrag || pageDrag || !viewport || event.defaultPrevented
     || event.isComposing || event.keyCode === 229 || event.altKey
-    || $('help-dialog').open || $('save-dialog').open || $('fullscreen-preview').open) return false;
+    || $('help-dialog').open || $('tool-help-dialog').open || $('save-dialog').open || $('fullscreen-preview').open) return false;
   if (!selectedText() && !textEdit) return false;
   const editable = event.target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])');
   if (editable && (!textEdit || (editable !== textEdit.editor && !textEdit.editor.contains?.(editable)))) return false;
@@ -1355,7 +1294,7 @@ function handlePenShortcut(event) {
   if (busy || stroke || annotationDrag || pageDrag || !viewport || !model.active || event.defaultPrevented
     || event.isComposing || event.keyCode === 229 || event.altKey
     || (!event.ctrlKey && !event.metaKey) || textEdit || selectedText()
-    || $('help-dialog').open || $('save-dialog').open || $('fullscreen-preview').open) return false;
+    || $('help-dialog').open || $('tool-help-dialog').open || $('save-dialog').open || $('fullscreen-preview').open) return false;
   if (!selectedStroke() && !penEnabled) return false;
   if (event.target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) return false;
   if (event.shiftKey) {
@@ -1647,7 +1586,7 @@ document.addEventListener('keydown', event => {
   if ($('fullscreen-preview').open) return;
   if (handleTextShortcut(event)) return;
   if (handlePenShortcut(event)) return;
-  if (event.key === 'Escape' && !event.repeat && !busy && !event.defaultPrevented && !event.isComposing && !$('help-dialog').open && !$('save-dialog').open) {
+  if (event.key === 'Escape' && !event.repeat && !busy && !event.defaultPrevented && !event.isComposing && !$('help-dialog').open && !$('tool-help-dialog').open && !$('save-dialog').open) {
     event.preventDefault();
     cancelAnnotationDrag(); finishPageDrag();
     if (stroke) {
@@ -1659,7 +1598,7 @@ document.addEventListener('keydown', event => {
     $('open-select').focus({ preventScroll: true });
     return;
   }
-  if (event.target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])') || $('help-dialog').open || $('save-dialog').open || busy || event.defaultPrevented || event.isComposing) return;
+  if (event.target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])') || $('help-dialog').open || $('tool-help-dialog').open || $('save-dialog').open || busy || event.defaultPrevented || event.isComposing) return;
   if (event.target === $('preview-scroll') && $('preview-scroll').scrollWidth > $('preview-scroll').clientWidth && ['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
   if (event.key === 'Delete' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && selectedAnnotation() && !textEdit && !stroke && !annotationDrag && !pageDrag) {
     event.preventDefault(); run(deleteSelectedAnnotation); return;
@@ -1684,3 +1623,4 @@ new ResizeObserver(entries => {
   clearTimeout(resizeTimer); resizeTimer = setTimeout(() => renderPreview(), 120);
 }).observe($('preview-area'));
 refresh();
+purgeLegacyPrintJobs().catch(fail);

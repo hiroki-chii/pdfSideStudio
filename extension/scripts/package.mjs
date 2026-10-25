@@ -24,6 +24,8 @@ for (const name of ['pdf-lib', '@pdf-lib/standard-fonts', '@pdf-lib/upng', 'pako
 }
 await writeFile('dist/THIRD_PARTY_LICENSES.txt', licenses);
 await cp('README.md', 'dist/README.md');
+await mkdir('dist/docs', { recursive: true });
+for (const name of ['architecture.md', 'security-review-2026-10-25.md']) await cp(`docs/${name}`, `dist/docs/${name}`);
 const manifest = JSON.parse(await readFile('dist/manifest.json', 'utf8'));
 for (const path of [manifest.side_panel.default_path, manifest.background.service_worker, ...Object.values(manifest.icons)]) await readFile(join('dist', path));
 const archive = {};

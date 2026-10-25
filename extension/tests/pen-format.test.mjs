@@ -449,7 +449,7 @@ test('pen shortcuts yield to text, editable fields, dialogs, IME and gestures in
     assert.equal(context.handlePenShortcut(shortcut('ArrowUp')), false);
     context[flag] = flag === 'busy' ? false : null;
   }
-  for (const id of ['help-dialog', 'save-dialog', 'fullscreen-preview']) {
+  for (const id of ['help-dialog', 'tool-help-dialog', 'save-dialog', 'fullscreen-preview']) {
     context.$(id).open = true;
     assert.equal(context.handlePenShortcut(shortcut('ArrowRight')), false);
     context.$(id).open = false;

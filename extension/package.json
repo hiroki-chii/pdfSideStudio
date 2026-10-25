@@ -1,21 +1,22 @@
 {
   "name": "pdf-side-studio",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "vite build && node scripts/package.mjs",
+    "build": "vite build && node scripts/package.mjs && node scripts/verify-build.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check src/app.js && node --check src/pdf.js && node --check src/text-format.js && node --check src/text-editor.js && node --check src/model.js && node --check src/theme.js && node --check src/print.js && node --check src/print-job.js && node --check src/fullscreen-preview.js && node --check public/background.js"
+    "check": "node scripts/check.mjs"
   },
   "dependencies": {
-    "fflate": "0.8.2",
+    "fflate": "0.8.3",
     "pdf-lib": "1.17.1",
     "pdfjs-dist": "6.3.289"
   },
   "devDependencies": {
     "@napi-rs/canvas": "1.0.10",
-    "vite": "8.3.2"
+    "eslint": "10.13.0",
+    "vite": "8.3.5"
   }
 }

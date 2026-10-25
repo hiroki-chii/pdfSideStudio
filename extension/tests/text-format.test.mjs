@@ -452,7 +452,7 @@ test('opacity shortcuts ignore backgroundless boxes, other inputs, modifiers, IM
     assert.equal(context.handleTextShortcut(key('ArrowLeft', true)), false);
     context[guard] = null;
   }
-  for (const dialog of ['help-dialog', 'save-dialog', 'fullscreen-preview']) {
+  for (const dialog of ['help-dialog', 'tool-help-dialog', 'save-dialog', 'fullscreen-preview']) {
     $(dialog).open = true;
     assert.equal(context.handleTextShortcut(key('ArrowRight', true)), false);
     $(dialog).open = false;

@@ -1,5 +1,4 @@
-import { PDFDocument, degrees } from 'pdf-lib';
-import { normalizeRotation } from './model.js';
+export { buildPdf } from './pdf-export.js';
 import { styledRuns, textStyle, textBackground } from './text-format.js';
 
 export function imagePlacement(viewport) {
@@ -277,24 +276,3 @@ export function paintStroke(ctx, stroke, viewport) {
   ctx.restore();
 }
 
-export async function buildPdf(records, sources, createOverlay, progress = () => {}) {
-  if (!records.length) throw new Error('保存するページがありません。');
-  const output = await PDFDocument.create();
-  output.setProducer('PDF Side Studio');
-  output.setCreator('PDF Side Studio');
-  for (const [index, record] of records.entries()) {
-    const source = sources.get(record.sourceId);
-    if (!source) throw new Error('元のPDFが見つかりません。再度追加してください。');
-    const [page] = await output.copyPages(source.document, [record.index]);
-    page.setRotation(degrees(normalizeRotation(record.rotation)));
-    output.addPage(page);
-    if (record.strokes.length || record.watermark) {
-      const { bytes, placement } = await createOverlay(record, source);
-      const image = await output.embedPng(bytes);
-      const { angle, ...position } = placement;
-      page.drawImage(image, { ...position, rotate: degrees(angle) });
-    }
-    progress(index + 1, records.length);
-  }
-  return output.save();
-}

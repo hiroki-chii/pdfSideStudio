@@ -36,7 +36,7 @@ function setup(job, decodeError = false) {
 test('print tab decodes every page before printing and supports retry after cancellation', async () => {
   const env = setup({ title: 'Edited PDF', pages: [{ blob: {}, width: 595, height: 842 }, { blob: {}, width: 842, height: 595 }] });
   await env.context.done;
-  assert.deepEqual(env.events, ['decode', 'decode', 'delete', 'layout', 'layout', 'print']);
+  assert.deepEqual(env.events, ['delete', 'decode', 'decode', 'layout', 'layout', 'print']);
   assert.equal(env.button.disabled, false);
   assert.equal(env.document.title, 'Edited PDF');
   assert.match(env.images[1].style.cssText, /width:842pt;height:595pt;page:sheet1/);
@@ -52,6 +52,6 @@ test('missing print data and image errors show an error without printing incompl
     assert.equal(env.button.disabled, true);
     assert.ok(env.status.textContent);
     assert.ok(!env.events.includes('print'));
-    assert.ok(!env.events.includes('delete'));
+    assert.ok(env.events.includes('delete'));
   }
 });

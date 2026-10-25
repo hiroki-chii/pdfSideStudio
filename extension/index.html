@@ -52,69 +52,79 @@
             <div id="preview-area" class="preview-area">
             <div class="preview-menu-layer">
             <section id="panel-select" class="preview-menu" aria-labelledby="select-menu-title" hidden>
-              <div class="preview-menu-heading"><h2 id="select-menu-title">オブジェクトを選択</h2></div>
-              <p class="tool-hint">プレビュー上のテキスト・描画・透かしをクリックして選択してください。テキスト同士、またはペン線・図形同士はShift＋クリックで追加選択・解除できます。</p>
-              <p class="subtle">選択後はドラッグで移動、Deleteキーで削除できます。新しく描く・文字を追加するときは上のツールを選びます。元のPDFの文字や画像は選択できません。</p>
+              <div class="preview-menu-heading"><h2 id="select-menu-title">オブジェクトを選択</h2><div class="menu-heading-actions"><button class="tool-help-button" type="button" data-tool-help="select" aria-label="選択の使い方" aria-haspopup="dialog" aria-controls="tool-help-dialog">使い方</button></div></div>
+              <p class="tool-hint">追加したテキスト・描画・透かしをクリックして選択します。</p>
+              <div class="tool-settings"><fieldset class="tool-settings-group"><legend>選択と移動</legend><p class="subtle">ドラッグ・方向キーで移動、Deleteで削除できます。</p><p class="subtle">Shift＋クリックで同じ種類のテキストや描画を追加選択・解除できます。</p></fieldset></div>
+              <p class="subtle">元のPDFの文字や画像は選択できません。</p>
             </section>
             <section id="panel-rotation" class="preview-menu" aria-labelledby="rotation-menu-title" hidden>
-              <div class="preview-menu-heading"><h2 id="rotation-menu-title">ページを回転</h2><button id="close-rotation" type="button">選択に戻る</button></div>
-              <div class="inline-field"><label class="scope-label" for="rotation-scope">対象</label><select id="rotation-scope"><option value="active">表示中のページ</option><option value="all">すべてのページ</option></select></div>
+              <div class="preview-menu-heading"><h2 id="rotation-menu-title">ページを回転</h2><div class="menu-heading-actions"><button class="tool-help-button" type="button" data-tool-help="rotation" aria-label="回転の使い方" aria-haspopup="dialog" aria-controls="tool-help-dialog">使い方</button><button id="close-rotation" type="button">選択に戻る</button></div></div>
+              <p class="tool-hint">対象を選び、方向ボタンで90°ずつ回転します。</p>
+              <div class="tool-settings"><fieldset class="tool-settings-group"><legend>回転の設定</legend>
+              <label class="tool-field" for="rotation-scope">対象<select id="rotation-scope"><option value="active">表示中のページ</option><option value="all">すべてのページ</option></select></label>
               <p id="rotation-target-hint" class="target-hint" aria-live="polite"></p>
+              </fieldset></div>
               <div class="action-grid rotation-actions"><button id="rotate-left">↶ 左に90°</button><button id="rotate-right">↷ 右に90°</button></div>
               <p class="subtle">方向ボタンを押すと回転します。「元に戻す」で取り消せます。</p>
             </section>
             <section id="panel-pen" class="preview-menu" aria-labelledby="pen-menu-title" hidden>
-              <div class="preview-menu-heading"><h2 id="pen-menu-title">ペンの設定</h2><button id="close-pen" type="button">描画を終了</button></div>
+              <div class="preview-menu-heading"><h2 id="pen-menu-title">ペンの設定</h2><div class="menu-heading-actions"><button class="tool-help-button" type="button" data-tool-help="pen" aria-label="ペンの使い方" aria-haspopup="dialog" aria-controls="tool-help-dialog">使い方</button><button id="close-pen" type="button">描画を終了</button></div></div>
               <p id="pen-mode-hint" class="tool-hint">紙面をドラッグして描きます。終了するには「描画を終了」かEsc。</p>
-              <div id="pen-shape-settings" class="inline-field"><label class="scope-label" for="pen-tool">描く形</label><select id="pen-tool"><option value="pen">フリーハンド</option><option value="line">直線</option><option value="ellipse">丸（楕円）</option><option value="rectangle">四角（長方形）</option></select></div>
-              <div class="pen-style-settings">
-              <div class="pen-settings"><label>色 <input id="pen-color" type="color" value="#e05267" /></label><label class="range-label">太さ <input id="pen-width" type="range" min="1" max="40" value="3" aria-keyshortcuts="Control+ArrowUp Control+ArrowDown" /><output id="pen-width-value">3</output></label></div>
-              <label class="pen-opacity range-label" for="pen-transparency">透明度 <input id="pen-transparency" type="range" min="0" max="95" value="0" aria-keyshortcuts="Control+ArrowLeft Control+ArrowRight" /><output id="pen-transparency-value">0%</output></label>
-              <p class="subtle">Ctrl＋↑／↓: 太さを1ptずつ増やす／減らす。Ctrl＋←／→: 透明度を1%ずつ下げる／上げる。Ctrl＋Shift＋↑／↓: 選択した描画を拡大／縮小。Shift＋クリックで複数選択すると、それぞれの元の値に同じ増減を加えます。1つでも上限・下限に達したら全体を止め、描画同士の差を保ちます。</p>
-              </div>
+              <div class="tool-settings"><fieldset class="tool-settings-group pen-style-settings"><legend>描画の書式</legend>
+              <div id="pen-shape-settings"><label class="tool-field" for="pen-tool">描く形<select id="pen-tool"><option value="pen">フリーハンド</option><option value="line">直線</option><option value="ellipse">丸（楕円）</option><option value="rectangle">四角（長方形）</option></select></label></div>
+              <label class="tool-field">色 <input id="pen-color" type="color" value="#e05267" /></label>
+              <label class="tool-range" for="pen-width"><span>太さ</span><output id="pen-width-value" for="pen-width">3</output><input id="pen-width" type="range" min="1" max="40" value="3" aria-keyshortcuts="Control+ArrowUp Control+ArrowDown" /></label>
+              <label class="tool-range" for="pen-transparency"><span>透明度</span><output id="pen-transparency-value" for="pen-transparency">0%</output><input id="pen-transparency" type="range" min="0" max="95" value="0" aria-keyshortcuts="Control+ArrowLeft Control+ArrowRight" /></label>
+              </fieldset></div>
               <div id="pen-drawing-settings">
-              <p class="tool-hint">透明度を上げるとマーカーに。丸・四角はShiftを押しながらドラッグすると正円・正方形になります。</p>
-              <p class="subtle">描画モードを開始すると太さ3pt・透明度0%に戻ります。設定は次に描く線・図形に適用されます。</p>
+              <p class="subtle">設定は次に描く線・図形に適用します。透明度を上げるとマーカーとして使えます。</p>
               </div>
-              <div id="stroke-selection-actions" hidden><div class="action-grid"><button id="start-pen" type="button">新しく描く</button><button id="delete-stroke" class="danger">選択した描画を削除</button></div><p class="subtle">ドラッグまたは方向キーで移動。Shift＋方向キーで10pt移動。「元に戻す」で書式変更・移動・削除を取り消せます。Escまたは空白クリックで選択を解除します。</p></div>
+              <div id="stroke-selection-actions" hidden><div class="action-grid"><button id="start-pen" type="button">新しく描く</button><button id="delete-stroke" class="danger">選択した描画を削除</button></div></div>
             </section>
             <section id="panel-stamp" class="preview-menu" aria-labelledby="stamp-menu-title" hidden>
-              <div class="preview-menu-heading"><h2 id="stamp-menu-title">番号スタンプ</h2><button id="close-stamp" type="button">スタンプを終了</button></div>
+              <div class="preview-menu-heading"><h2 id="stamp-menu-title">番号スタンプ</h2><div class="menu-heading-actions"><button class="tool-help-button" type="button" data-tool-help="stamp" aria-label="番号スタンプの使い方" aria-haspopup="dialog" aria-controls="tool-help-dialog">使い方</button><button id="close-stamp" type="button">スタンプを終了</button></div></div>
               <p class="tool-hint">紙面をクリックするたびに番号を押し、1つずつ増やします。ページを移動しても連番を続けます。</p>
-              <div class="inline-field"><label class="scope-label" for="stamp-number">次の番号</label><input id="stamp-number" type="number" min="1" max="9007199254740990" step="1" value="1" /></div>
-              <div class="inline-field stamp-pattern-field"><label class="scope-label" for="stamp-pattern">パターン</label><select id="stamp-pattern"><option value="plain">番号のみ</option><option value="circle">丸枠付き番号</option><option value="circle-filled">丸塗りつぶし</option><option value="square">四角枠付き番号</option><option value="square-filled">四角塗りつぶし</option></select></div>
-              <div class="stamp-settings"><label>色 <input id="stamp-color" type="color" value="#e05267" /></label><label>サイズ <input id="stamp-size" type="number" min="8" max="96" value="24" /> pt</label></div>
+              <div class="tool-settings"><fieldset class="tool-settings-group"><legend>番号とパターン</legend>
+              <label class="tool-field" for="stamp-number">次の番号<input id="stamp-number" type="number" min="1" max="9007199254740990" step="1" value="1" /></label>
+              <label class="tool-field" for="stamp-pattern">パターン<select id="stamp-pattern"><option value="plain">番号のみ</option><option value="circle">丸枠付き番号</option><option value="circle-filled">丸塗りつぶし</option><option value="square">四角枠付き番号</option><option value="square-filled">四角塗りつぶし</option></select></label>
+              </fieldset><fieldset class="tool-settings-group"><legend>番号の書式</legend>
+              <div class="tool-format-row"><label>色 <input id="stamp-color" type="color" value="#e05267" /></label><label>サイズ <input id="stamp-size" type="number" min="8" max="96" value="24" /> pt</label></div>
+              </fieldset></div>
               <p id="stamp-next-hint" class="target-hint" aria-live="polite">次に押す番号: 1</p>
-              <p class="subtle">「元に戻す」で配置と次の番号を戻せます。終了は「スタンプを終了」・「選択」・Esc。配置した番号は選択モードで移動・削除・テキストとして編集できます。</p>
             </section>
             <section id="panel-watermark" class="preview-menu" aria-labelledby="watermark-menu-title" hidden>
-              <div class="preview-menu-heading"><h2 id="watermark-menu-title">透かしの設定</h2><button id="close-watermark" type="button">選択に戻る</button></div>
-              <label class="field-label" for="watermark-text">透かしのテキスト</label><input id="watermark-text" class="full-input" value="社外秘" maxlength="80" placeholder="例: 社外秘 / DRAFT" />
-              <div class="watermark-settings"><label>色 <input id="watermark-color" type="color" value="#736c90" /></label><label class="range-label">濃さ <input id="watermark-opacity" type="range" min="5" max="70" value="20" /><output id="watermark-opacity-value">20%</output></label></div>
-              <div class="inline-field"><label class="scope-label" for="watermark-scope">対象</label><select id="watermark-scope"><option value="active">表示中のページ</option><option value="all" selected>すべてのページ</option></select></div>
+              <div class="preview-menu-heading"><h2 id="watermark-menu-title">透かしの設定</h2><div class="menu-heading-actions"><button class="tool-help-button" type="button" data-tool-help="watermark" aria-label="透かしの使い方" aria-haspopup="dialog" aria-controls="tool-help-dialog">使い方</button><button id="close-watermark" type="button">選択に戻る</button></div></div>
+              <p class="tool-hint">文字・書式・対象を設定し、適用ボタンで反映します。</p>
+              <div class="tool-settings"><fieldset class="tool-settings-group"><legend>透かしの書式</legend>
+              <label class="tool-field" for="watermark-text">テキスト<input id="watermark-text" value="社外秘" maxlength="80" placeholder="例: 社外秘 / DRAFT" /></label>
+              <label class="tool-field">色 <input id="watermark-color" type="color" value="#736c90" /></label>
+              <label class="tool-range" for="watermark-opacity"><span>濃さ</span><output id="watermark-opacity-value" for="watermark-opacity">20%</output><input id="watermark-opacity" type="range" min="5" max="70" value="20" /></label>
+              </fieldset><fieldset class="tool-settings-group"><legend>適用するページ</legend>
+              <label class="tool-field" for="watermark-scope">対象<select id="watermark-scope"><option value="active">表示中のページ</option><option value="all" selected>すべてのページ</option></select></label>
               <p id="watermark-target-hint" class="target-hint" aria-live="polite"></p>
+              </fieldset></div>
               <div class="action-grid watermark-actions"><button id="apply-watermark" class="accent-button">透かしを適用</button><button id="remove-watermark" class="danger">透かしを削除</button></div><p class="subtle">設定は「適用」で反映され、対象ページの追加済み透かしを置き換えます。削除できるのはこの編集で追加した透かしです。</p>
             </section>
             <section id="panel-text" class="preview-menu" aria-labelledby="text-menu-title" hidden>
-              <div class="preview-menu-heading"><h2 id="text-menu-title">テキストを配置</h2><button id="close-text" type="button">配置を終了</button></div>
+              <div class="preview-menu-heading"><h2 id="text-menu-title">テキストを配置</h2><div class="menu-heading-actions"><button class="tool-help-button" type="button" data-tool-help="text" aria-label="テキストの使い方" aria-haspopup="dialog" aria-controls="tool-help-dialog">使い方</button><button id="close-text" type="button">配置を終了</button></div></div>
               <p id="text-mode-hint" class="tool-hint">紙面を1回クリックして入力します。</p>
-              <div class="text-settings">
+              <div class="text-settings tool-settings">
                 <div class="text-settings-tabs" role="tablist" aria-label="テキスト設定"><button id="text-tab-characters" type="button" role="tab" aria-selected="true" aria-controls="text-character-settings">文字</button><button id="text-tab-background" type="button" role="tab" aria-selected="false" aria-controls="text-background-settings" tabindex="-1">背景</button></div>
-                <fieldset id="text-character-settings" class="text-settings-group" role="tabpanel" aria-labelledby="text-tab-characters"><legend>文字書式</legend>
-                  <label class="text-font-field">フォント <select id="text-font"><option value="sans-serif">ゴシック</option><option value="serif">明朝</option><option value="monospace">等幅</option></select></label>
-                  <div class="text-format-row"><label>文字色 <input id="text-color" type="color" value="#222222" /></label><label>サイズ <input id="text-size" type="number" min="8" max="96" value="24" /> pt</label></div>
+                <fieldset id="text-character-settings" class="text-settings-group tool-settings-group" role="tabpanel" aria-labelledby="text-tab-characters"><legend>文字書式</legend>
+                  <label class="text-font-field tool-field">フォント <select id="text-font"><option value="sans-serif">ゴシック</option><option value="serif">明朝</option><option value="monospace">等幅</option></select></label>
+                  <div class="text-format-row tool-format-row"><label>文字色 <input id="text-color" type="color" value="#222222" /></label><label>サイズ <input id="text-size" type="number" min="8" max="96" value="24" /> pt</label></div>
                   <div class="text-style-buttons" role="group" aria-label="文字の装飾"><button id="text-bold" type="button" aria-pressed="false" aria-keyshortcuts="Control+b" title="太字（Ctrl+B）"><b>太字</b></button><button id="text-italic" type="button" aria-pressed="false" aria-keyshortcuts="Control+i" title="斜体（Ctrl+I）"><i>斜体</i></button><button id="text-underline" type="button" aria-pressed="false" aria-keyshortcuts="Control+u" title="下線（Ctrl+U）"><u>下線</u></button></div>
-                  <label class="text-font-field">配置 <select id="text-align"><option value="left">左揃え</option><option value="center">中央揃え</option><option value="right">右揃え</option></select></label>
+                  <label class="text-font-field tool-field">配置 <select id="text-align"><option value="left">左揃え</option><option value="center">中央揃え</option><option value="right">右揃え</option></select></label>
                 </fieldset>
-                <fieldset id="text-background-settings" class="text-settings-group" role="tabpanel" aria-labelledby="text-tab-background" hidden><legend>背景色と不透明度</legend>
-                  <label class="text-font-field">背景色 <select id="text-background"><option value="none">なし</option><option value="#ffffff">白</option><option value="#000000" selected>黒</option></select></label>
-                  <label class="text-background-opacity" for="text-background-opacity"><span>不透明度</span><output id="text-background-opacity-value" for="text-background-opacity">0%</output><input id="text-background-opacity" type="range" min="0" max="100" step="1" value="0" aria-keyshortcuts="Control+ArrowLeft Control+ArrowRight" /></label>
+                <fieldset id="text-background-settings" class="text-settings-group tool-settings-group" role="tabpanel" aria-labelledby="text-tab-background" hidden><legend>背景色と不透明度</legend>
+                  <label class="text-font-field tool-field">背景色 <select id="text-background"><option value="none">なし</option><option value="#ffffff">白</option><option value="#000000" selected>黒</option></select></label>
+                  <label class="text-background-opacity tool-range" for="text-background-opacity"><span>不透明度</span><output id="text-background-opacity-value" for="text-background-opacity">0%</output><input id="text-background-opacity" type="range" min="0" max="100" step="1" value="0" aria-keyshortcuts="Control+ArrowLeft Control+ArrowRight" /></label>
                   <p class="subtle">0%で透明、100%で不透明。Ctrl＋←／→で1%ずつ下げる／上げる。新規テキストは黒・0%です。</p>
                 </fieldset>
               </div>
               <div id="text-selection-actions" class="action-grid text-actions" hidden><button id="update-text" aria-keyshortcuts="F2" title="内容を編集（F2）">内容を編集</button><button id="delete-text" class="danger">選択テキストを削除</button></div>
               <div id="text-edit-actions" class="action-grid text-actions" hidden><button id="confirm-text" class="accent-button" type="button">入力を確定</button><button id="cancel-text" type="button">入力を取り消す</button></div>
-              <details class="text-shortcuts"><summary>操作方法・ショートカット</summary><p id="text-edit-hint" class="subtle">外側クリック・Ctrl+Enter・Escで入力を確定。「入力を取り消す」で変更を取り消します。確定後はドラッグ・方向キーで移動できます。</p><p class="subtle">F2: 編集開始 · Ctrl+B/I/U: 太字／斜体／下線 · Ctrl+↑/↓: 1ptずつ拡大／縮小 · Ctrl+←/→: 背景の不透明度を1%ずつ下げる／上げる。編集中の文字書式は選択範囲に、背景は常にボックス全体に適用します。</p></details>
+              <p id="text-edit-hint" class="subtle">外側クリック・Ctrl+Enter・Escで入力を確定。「入力を取り消す」で変更を取り消します。</p>
             </section>
             </div>
             <button id="previous" class="preview-nav preview-nav-previous" aria-label="前のページ" title="前のページ（←キー）" aria-keyshortcuts="ArrowLeft"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m14 6-6 6 6 6"/></svg></button>
@@ -147,9 +157,9 @@
       <p id="fullscreen-status" class="fullscreen-status" role="status" hidden>読み込み中…</p>
     </dialog>
     <dialog id="save-dialog" aria-labelledby="save-dialog-title">
-      <div class="dialog-heading"><h2 id="save-dialog-title">PDFを保存</h2><button id="close-save" class="icon-button" aria-label="保存設定を閉じる" title="閉じる">×</button></div>
-      <div class="save-settings">
-        <label class="field-label" for="output-name">保存ファイル名</label><div class="filename-field"><input id="output-name" value="edited" maxlength="120" autofocus /></div>
+      <div class="dialog-heading"><h2 id="save-dialog-title">PDFを保存</h2><div class="menu-heading-actions"><button class="tool-help-button" type="button" data-tool-help="save" aria-label="保存・分割の使い方" aria-haspopup="dialog" aria-controls="tool-help-dialog">使い方</button><button id="close-save" class="icon-button" aria-label="保存設定を閉じる" title="閉じる">×</button></div></div>
+      <div class="save-settings tool-settings">
+        <fieldset class="tool-settings-group"><legend>保存の設定</legend><label class="tool-field" for="output-name">ファイル名<input id="output-name" value="edited" maxlength="120" autofocus /></label></fieldset>
         <button id="save" class="save-button">PDFを保存 <span id="save-count"></span><span aria-hidden="true">↓</span></button>
         <button id="split" class="split-button">1ページずつ分割（ZIP） <span id="split-count"></span></button>
         <p class="split-note">全ページを個別のPDFにしてZIPで保存します。</p>
@@ -157,7 +167,20 @@
         <p class="save-note">編集はこのパネル内だけに保持されます。閉じる前に保存してください。</p>
       </div>
     </dialog>
-    <dialog id="help-dialog"><div class="dialog-heading"><h2>使い方</h2><button id="close-help" class="icon-button" aria-label="使い方を閉じる">×</button></div><ol><li>PDFを追加します。複数ファイルは追加順に結合されます。</li><li>プレビュー上のページ一覧をドラッグして順序を変更します。クリックするとプレビューが切り替わり、そのページのコピー・削除を選べます。</li><li>コピー・削除はページ一覧から選んだページに適用します。回転・透かしは表示中のページ／すべてのページを指定できます。</li><li>「PDFを保存」で全ページを出力します。分割は保存画面から実行します。</li></ol><p>分割では全ページを1ページずつPDFにしてZIPで保存します。</p><p>パスワード保護PDFは非対応です。フォーム入力値、注釈、リンク等の保持は保証しません。電子署名は無効になります。元ファイルを残し、保存後のPDFを確認してください。</p><p>1ファイル50MB、合計150MB・300ページまで。編集履歴は直近30操作を保持します。</p><p>ページ上の既存テキストの書き換えや、元PDFに含まれる透かしの除去はできません。</p></dialog>
+    <dialog id="tool-help-dialog" class="tool-help-dialog" aria-labelledby="tool-help-title">
+      <div class="dialog-heading"><h2 id="tool-help-title">使い方</h2><button id="close-tool-help" class="icon-button" type="button" aria-label="使い方を閉じる" title="閉じる（Esc）" autofocus>×</button></div>
+      <div id="tool-help-content"></div>
+      <p class="tool-help-footer">外側をクリック、またはEscキーでも閉じられます。</p>
+    </dialog>
+    <dialog id="help-dialog">
+      <div class="dialog-heading"><h2>使い方</h2><button id="close-help" class="icon-button" aria-label="使い方を閉じる">×</button></div>
+      <ol><li>PDFを追加します。複数ファイルは追加順に結合されます。</li><li>プレビュー上のページ一覧をドラッグして順序を変更します。クリックするとプレビューが切り替わり、そのページのコピー・削除を選べます。</li><li>コピー・削除はページ一覧から選んだページに適用します。回転・透かしは表示中のページ／すべてのページを指定できます。</li><li>「PDFを保存」で全ページを出力します。分割は保存画面から実行します。</li></ol>
+      <p>分割では全ページを1ページずつPDFにしてZIPで保存します。</p>
+      <p>パスワード保護PDFは非対応です。既存の注釈・リンク・添付ファイル・起動アクションは保存時に引き継ぎません。フォーム入力値等の保持は保証しません。電子署名は無効になります。元ファイルを残し、保存後のPDFを確認してください。</p>
+      <p>1ファイル50MiB、合計150MiB・300ページまで。編集履歴は直近30操作を保持します。安全上限を超える複雑なPDFは読み込めない場合があります。</p>
+      <p>印刷タブに資料が表示されるまでは編集パネルを開いたままにしてください。印刷用データは端末へ保存せず、メモリー内で受け渡します。</p>
+      <p>ページ上の既存テキストの書き換えや、元PDFに含まれる透かしの除去はできません。</p>
+    </dialog>
     <script type="module" src="/src/app.js"></script>
   </body>
 </html>

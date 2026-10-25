@@ -44,6 +44,7 @@ function setup(tool) {
   function pointerdown({ target = 'canvas', ...overrides } = {}) {
     const event = { button: 0, isPrimary: true, pointerId: 1, clientX: 20, clientY: 30,
       target: { closest(selector) {
+        if (selector === '[data-tool-help], #tool-help-dialog' && ['tool-help', 'tool-help-dialog'].includes(target)) return {};
         if (selector.startsWith('.canvas-stack,') && ['canvas', 'handle', 'editor', 'settings', 'button', 'dialog', 'label'].includes(target)) return {};
         if (selector === '#preview-scroll' && ['canvas', 'handle', 'blank', 'editor'].includes(target)) return {};
         if (selector === '.text-editor' && target === 'editor') return {};
@@ -162,4 +163,18 @@ test('other menus retain outside-click dismissal', () => {
   const { context, pointerdown } = setup('rotation');
   assert.equal(pointerdown().stopped, undefined);
   assert.equal(context.previewMenuOpen, true);
+});
+
+test('tool help controls preserve an active text draft, selection and menu', () => {
+  for (const target of ['tool-help', 'tool-help-dialog']) {
+    const { context, calls, pointerdown } = setup('text');
+    const draft = { editor: {} };
+    context.textEdit = draft;
+    context.selectedAnnotationId = 'text';
+    pointerdown({ target });
+    assert.equal(context.textEdit, draft);
+    assert.equal(context.selectedAnnotationId, 'text');
+    assert.equal(context.previewMenuOpen, true);
+    assert.deepEqual(calls, []);
+  }
 });

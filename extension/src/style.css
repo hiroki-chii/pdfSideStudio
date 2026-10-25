@@ -72,20 +72,34 @@ dialog.fullscreen-preview{position:fixed;inset:0;width:100vw;height:100dvh;max-w
 @media(min-width:480px){.fullscreen-footer{grid-template-columns:1fr auto 1fr}.fullscreen-pagination{grid-column:2;grid-row:1}.fullscreen-footer>div{grid-column:1;grid-row:1}.fullscreen-footer>span{grid-column:3;grid-row:1;text-align:right}}
 .fullscreen-footer>div{display:flex;align-items:center;gap:4px}.fullscreen-footer button{min-width:28px;height:30px;padding:0 6px;font-size:12px}.fullscreen-footer output{min-width:42px;text-align:center;font-size:11px;font-variant-numeric:tabular-nums}.fullscreen-footer>span{font-size:10px;color:var(--muted);white-space:nowrap}
 .fullscreen-status{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:max-content;max-width:calc(100% - 32px);margin:0;padding:8px 12px;border-radius:8px;background:var(--nav-bg);color:var(--ink);font-size:12px;text-align:center}
-.preview-menu .text-settings{display:grid;gap:8px}
+.tool-settings,.preview-menu .text-settings{display:grid;align-items:stretch;gap:8px}
+.preview-menu .tool-settings{margin:6px 0}
+.menu-heading-actions{display:flex;align-items:center;justify-content:flex-end;flex-shrink:0;gap:6px}
+.preview-menu .preview-menu-heading{flex-wrap:wrap;align-items:center}
+.preview-menu-heading h2{flex:1;min-width:6em}
+.tool-help-button{min-height:32px;padding:5px 8px;font-size:11px;color:var(--purple);background:var(--accent-soft);border-color:var(--border-accent);white-space:nowrap}
+.tool-help-dialog{max-height:calc(100dvh - 32px);overflow:auto;overscroll-behavior:contain}
+.tool-help-dialog .dialog-heading{position:sticky;top:-21px;gap:8px;padding:8px 0;background:var(--surface)}
+.tool-help-dialog h3{margin:16px 0 4px;font-size:12px}
+.tool-help-dialog ul{padding-left:20px}
+.tool-help-dialog .tool-help-footer{margin-bottom:0;font-size:10px}
 .text-settings-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;padding:3px;border:1px solid var(--line);border-radius:8px;background:var(--tabs-bg)}
 .text-settings-tabs button{border-color:transparent;background:transparent;min-height:30px;font-size:11px;color:var(--muted)}
 .text-settings-tabs button[aria-selected=true]{border-color:var(--border-accent);background:var(--surface);color:var(--purple);font-weight:650}
-.text-settings-group{display:grid;gap:6px;min-width:0;margin:0;padding:6px 10px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
-.text-settings-group legend{padding:0 5px;font-size:11px;font-weight:650;color:var(--muted)}
+.tool-settings-group{display:grid;gap:6px;min-width:0;margin:0;padding:6px 10px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.tool-settings-group legend{padding:0 5px;font-size:11px;font-weight:650;color:var(--muted)}
+.tool-settings label{display:flex;align-items:center;gap:6px;font-size:11px}
+.tool-settings .tool-field{display:grid;grid-template-columns:5em minmax(0,1fr);gap:6px}
+.tool-field input:not([type=color]),.tool-field select{width:100%}
+.tool-settings input:not([type=color]):not([type=range]),.tool-settings select{padding:5px 6px;font-size:11px}
+.tool-settings input[type=number]{width:64px}
+.tool-settings .tool-field input[type=number]{width:100%}
+.tool-settings-group .subtle,.tool-settings-group .target-hint{margin:0}
+.tool-settings .tool-range{display:grid;grid-template-columns:1fr auto;gap:4px 8px}
+.tool-range input{grid-column:1/-1;width:100%;margin:0;min-height:20px}
+.tool-range output{font-variant-numeric:tabular-nums}
+.tool-format-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
 .text-settings-group .text-style-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
-.text-settings-group .text-font-field{display:grid;grid-template-columns:4em minmax(0,1fr)}
-.text-settings-group .subtle{margin:0;font-size:10px}
-.text-settings .text-background-opacity{display:grid;grid-template-columns:1fr auto;gap:4px 8px}
-.text-background-opacity input{grid-column:1/-1;width:100%;margin:0;min-height:20px}
-.text-background-opacity output{font-variant-numeric:tabular-nums}
-.text-shortcuts{margin-top:10px;font-size:11px;color:var(--muted)}
-.text-shortcuts summary{cursor:pointer}
 .text-font-field select{flex:1}
 .text-format-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
 .text-settings select{padding:5px 6px;font-size:11px}
