@@ -58,8 +58,8 @@ const toolDescriptions = {
   'open-pen': '色・太さ・透明度を設定して紙面をドラッグ。「描画を終了」またはEscで選択モードに戻ります。',
   'open-text': '紙面をクリックしてテキストを1つ追加。「入力を確定」で選択モードに戻ります。配置前のEscで終了。',
   'open-stamp': '紙面をクリックするたびに番号を配置し、次の番号を1つ増やします。Escで選択モードに戻ります。',
-  'open-rotation': '対象ページを選び、方向ボタンで左右90度ずつ回転。「元に戻す」で取り消せます。',
-  'open-watermark': '文字・色・濃さ・対象を設定し、「適用」で反映。対象ページの追加済み透かしを置き換えます。',
+  'open-rotation': '対象ページを選び、方向ボタンまたはCtrl＋←／→で左右90度ずつ回転。「元に戻す」で取り消せます。',
+  'open-watermark': '文字・色・不透明度・対象を設定し、「適用」で反映。透かし選択中はCtrl＋←／→で不透明度を1%ずつすぐ変更できます。対象ページの追加済み透かしを置き換えます。',
 };
 for (const [id, description] of Object.entries(toolDescriptions)) {
   const button = $(id);
@@ -1320,6 +1320,34 @@ function handlePenShortcut(event) {
   previewStrokeFormatting(id, widthStep || transparencyStep); finishAnnotationFormatting();
   return true;
 }
+function handlePageToolShortcut(event) {
+  if (busy || stroke || annotationDrag || pageDrag || !viewport || !model.active || textEdit
+    || event.defaultPrevented || event.isComposing || event.keyCode === 229
+    || event.altKey || event.shiftKey || (!event.ctrlKey && !event.metaKey)
+    || $('help-dialog').open || $('tool-help-dialog').open || $('save-dialog').open || $('fullscreen-preview').open) return false;
+  const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+  if (!step) return false;
+  const annotation = selectedAnnotation();
+  if (annotation && annotation.tool !== 'watermark') return false;
+  const tool = annotation ? 'watermark' : activePreviewMenu;
+  if (!['watermark', 'rotation'].includes(tool)) return false;
+  const editable = event.target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])');
+  const opacity = $('watermark-opacity');
+  if (editable && editable !== $(`${tool}-scope`) && (tool !== 'watermark' || editable !== opacity)) return false;
+  event.preventDefault(); event.stopPropagation();
+  if (tool === 'rotation') run(() => rotate(step * 90));
+  else {
+    const current = annotation ? Math.round(annotation.opacity * 100) : Number(opacity.value);
+    const next = Math.max(Number(opacity.min), Math.min(Number(opacity.max), current + step));
+    opacity.value = next;
+    opacity.dispatchEvent(new Event('input', { bubbles: true }));
+    if (annotation && next / 100 !== annotation.opacity) {
+      model.update(new Set([model.activeId]), page => ({ ...page, watermark: { ...page.watermark, opacity: next / 100 } }));
+      paintTextPreview(); refreshAnnotationHandles(); refreshThumbnails(); updateControls();
+    }
+  }
+  return true;
+}
 function deleteSelectedAnnotation() {
   const annotation = selectedAnnotation();
   if (!annotation) return;
@@ -1389,7 +1417,8 @@ function refreshAnnotationHandles() {
     if (!isText) button.title = 'クリックで選択。ドラッグで移動。方向キーで1pt、Shift＋方向キーで10pt移動。Deleteで削除。';
     const isStroke = !isText && annotation.tool !== 'watermark';
     if (isStroke) button.title += ' Shift＋クリックで追加選択・解除。Ctrl＋↑／↓で太さ、Ctrl＋←／→で透明度を相対変更。Ctrl＋Shift＋↑／↓で描画を拡大・縮小。';
-    button.setAttribute('aria-keyshortcuts', `${isText ? 'F2 Control+b Control+i Control+u Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight ' : isStroke ? 'Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight Control+Shift+ArrowUp Control+Shift+ArrowDown ' : ''}Delete ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown`);
+    if (annotation.tool === 'watermark') button.title += ' Ctrl＋←／→で不透明度を1%ずつ変更し、すぐ反映します。';
+    button.setAttribute('aria-keyshortcuts', `${isText ? 'F2 Control+b Control+i Control+u Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight ' : isStroke ? 'Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight Control+Shift+ArrowUp Control+Shift+ArrowDown ' : 'Control+ArrowLeft Control+ArrowRight '}Delete ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown`);
     positionAnnotationHandle(button, annotationPreview(annotation));
     if (existing) continue;
     const currentText = () => pageAnnotations().find(item => item.id === button.dataset.annotationId);
@@ -1586,6 +1615,7 @@ document.addEventListener('keydown', event => {
   if ($('fullscreen-preview').open) return;
   if (handleTextShortcut(event)) return;
   if (handlePenShortcut(event)) return;
+  if (handlePageToolShortcut(event)) return;
   if (event.key === 'Escape' && !event.repeat && !busy && !event.defaultPrevented && !event.isComposing && !$('help-dialog').open && !$('tool-help-dialog').open && !$('save-dialog').open) {
     event.preventDefault();
     cancelAnnotationDrag(); finishPageDrag();

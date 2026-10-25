@@ -64,8 +64,8 @@
               <label class="tool-field" for="rotation-scope">対象<select id="rotation-scope"><option value="active">表示中のページ</option><option value="all">すべてのページ</option></select></label>
               <p id="rotation-target-hint" class="target-hint" aria-live="polite"></p>
               </fieldset></div>
-              <div class="action-grid rotation-actions"><button id="rotate-left">↶ 左に90°</button><button id="rotate-right">↷ 右に90°</button></div>
-              <p class="subtle">方向ボタンを押すと回転します。「元に戻す」で取り消せます。</p>
+              <div class="action-grid rotation-actions"><button id="rotate-left" aria-keyshortcuts="Control+ArrowLeft" title="左に90°（Ctrl＋←）">↶ 左に90°</button><button id="rotate-right" aria-keyshortcuts="Control+ArrowRight" title="右に90°（Ctrl＋→）">↷ 右に90°</button></div>
+              <p class="subtle">方向ボタンまたはCtrl＋←／→で左右90°ずつ回転します。「元に戻す」で取り消せます。</p>
             </section>
             <section id="panel-pen" class="preview-menu" aria-labelledby="pen-menu-title" hidden>
               <div class="preview-menu-heading"><h2 id="pen-menu-title">ペンの設定</h2><div class="menu-heading-actions"><button class="tool-help-button" type="button" data-tool-help="pen" aria-label="ペンの使い方" aria-haspopup="dialog" aria-controls="tool-help-dialog">使い方</button><button id="close-pen" type="button">描画を終了</button></div></div>
@@ -98,7 +98,8 @@
               <div class="tool-settings"><fieldset class="tool-settings-group"><legend>透かしの書式</legend>
               <label class="tool-field" for="watermark-text">テキスト<input id="watermark-text" value="社外秘" maxlength="80" placeholder="例: 社外秘 / DRAFT" /></label>
               <label class="tool-field">色 <input id="watermark-color" type="color" value="#736c90" /></label>
-              <label class="tool-range" for="watermark-opacity"><span>濃さ</span><output id="watermark-opacity-value" for="watermark-opacity">20%</output><input id="watermark-opacity" type="range" min="5" max="70" value="20" /></label>
+              <label class="tool-range" for="watermark-opacity"><span>不透明度</span><output id="watermark-opacity-value" for="watermark-opacity">20%</output><input id="watermark-opacity" type="range" min="5" max="70" step="1" value="20" aria-keyshortcuts="Control+ArrowLeft Control+ArrowRight" /></label>
+              <p class="subtle">Ctrl＋←／→で不透明度を1%ずつ下げる／上げる。透かし選択中はすぐ反映。未選択時は「適用」で反映します。</p>
               </fieldset><fieldset class="tool-settings-group"><legend>適用するページ</legend>
               <label class="tool-field" for="watermark-scope">対象<select id="watermark-scope"><option value="active">表示中のページ</option><option value="all" selected>すべてのページ</option></select></label>
               <p id="watermark-target-hint" class="target-hint" aria-live="polite"></p>
