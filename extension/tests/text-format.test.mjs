@@ -63,7 +63,7 @@ function setup() {
       editor.setAnnotation = value => { editor.value = value.text; };
       return editor;
     },
-    busy: false, selectedAnnotationId: 'text', textFormatPreview: null, textEdit: null,
+    busy: false, selectedAnnotationId: 'text', selectedStrokeIds: new Set(), annotationFormatPreview: null, strokeFormatSession: null, textEdit: null,
     textEnabled: false, penEnabled: false, activePreviewMenu: 'text',
     previewMenuOpen: false, stroke: null, annotationDrag: null, pageDrag: null,
     previewMenus: ['rotation', 'pen', 'watermark'], previewZoom: 1, minPreviewZoom: 0.5, maxPreviewZoom: 4,
@@ -233,7 +233,7 @@ test('selected text formatting updates immediately, restores through history and
   const { context, $, model, original } = setup();
   // Opening and confirming legacy text must not create an Undo entry.
   const history = model.past.length;
-  context.previewTextFormatting(); context.finishTextFormatting();
+  context.previewTextFormatting(); context.finishAnnotationFormatting();
   assert.equal(model.past.length, history);
   $('text-font').value = 'serif'; $('text-font').handlers.change();
   $('text-align').value = 'right'; $('text-align').handlers.change();

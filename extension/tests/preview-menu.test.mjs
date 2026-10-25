@@ -25,14 +25,14 @@ function setup(tool) {
   const context = vm.createContext({ $, document: {
     addEventListener(type, handler, capture) { documentHandlers[type] = { handler, capture }; },
   }, previewMenuOpen: true, penEnabled: tool === 'pen', textEnabled: tool === 'text',
-  busy: false, stroke: null, annotationDrag: null, pageDrag: null, selectedAnnotationId: null,
+  busy: false, stroke: null, annotationDrag: null, pageDrag: null, selectedAnnotationId: null, selectedStrokeIds: new Set(),
   activePreviewMenu: tool, textEdit: null, viewport: {},
   model: { activeId: 'page', active: { rotation: 0, strokes: [] },
     update() { calls.push('save-stroke'); } },
   updateControls() {
     if (!context.previewMenuOpen) { $('panel-pen').hidden = true; $('panel-text').hidden = true; }
   },
-  finishTextFormatting() { calls.push('format'); },
+  finishAnnotationFormatting() { calls.push('format'); },
   finishTextEdit() { calls.push('commit-text'); return true; },
   refreshAnnotationHandles() {}, refreshThumbnails() {}, status() {},
   enableSelection() { calls.push('select'); }, uid: () => 'annotation',

@@ -33,10 +33,12 @@ let renderTask = null;
 let renderVersion = 0;
 let stroke = null;
 let selectedAnnotationId = null;
+const selectedStrokeIds = new Set();
 let annotationDrag = null;
 let textEnabled = false;
 let textEdit = null;
-let textFormatPreview = null;
+let annotationFormatPreview = null;
+let strokeFormatSession = null;
 let thumbQueue = [];
 let thumbRunning = false;
 let observer = null;
@@ -104,14 +106,14 @@ function updateControls() {
   $('save').disabled = busy || !model.pages.length;
   $('open-save').disabled = busy || !model.pages.length;
   $('print').disabled = busy || !model.pages.length;
-  $('clear-ink').disabled = busy || !model.active?.strokes.some(item => item.tool !== 'text');
   if (!selectedAnnotation()) selectedAnnotationId = null;
   const textSelected = !!(selectedText() || textEdit);
+  const strokeSelected = !!selectedStroke();
   const visibleMenu = !previewMenuOpen ? null : selectedStroke() ? 'pen'
     : textEnabled || selectedText() || textEdit ? 'text'
       : selectedAnnotation()?.tool === 'watermark' ? 'watermark' : activePreviewMenu;
   $('open-select').disabled = busy || !model.active;
-  $('open-select').setAttribute('aria-pressed', String(!textSelected && activePreviewMenu === 'select'));
+  $('open-select').setAttribute('aria-pressed', String(!textSelected && !strokeSelected && activePreviewMenu === 'select'));
   $('open-select').setAttribute('aria-controls', 'panel-select');
   $('open-select').setAttribute('aria-expanded', String(visibleMenu === 'select' && !!model.active));
   $('panel-select').hidden = !model.active || visibleMenu !== 'select';
@@ -119,12 +121,15 @@ function updateControls() {
   $('delete-text').disabled = busy || !selectedText();
   $('panel-text').hidden = !model.active || visibleMenu !== 'text';
   $('delete-stroke').disabled = busy || !selectedStroke();
-  $('pen-menu-title').textContent = selectedStroke() ? '選択した描画' : 'ペンの設定';
+  const strokeCount = selectedStrokes().length;
+  $('pen-menu-title').textContent = strokeCount > 1 ? `選択した描画（${strokeCount}件）` : selectedStroke() ? '選択した描画' : 'ペンの設定';
   $('close-pen').textContent = selectedStroke() ? '選択を解除' : '描画を終了';
   $('pen-drawing-settings').hidden = !!selectedStroke();
+  $('pen-shape-settings').hidden = strokeSelected;
   $('stroke-selection-actions').hidden = !selectedStroke();
   $('pen-mode-hint').textContent = selectedStroke()
-    ? '選択した描画だけを移動・削除できます。'
+    ? strokeCount > 1 ? '太さ・透明度は各描画の元の値に同じ差分を適用します。スライダーの数値は最後に選んだ描画の値です。色は選択全体に適用します。'
+      : '色・太さ・透明度は選択した描画だけにすぐ反映されます。Shift＋クリックで描画を追加選択できます。'
     : '紙面をドラッグして描きます。終了するには「描画を終了」かEsc。';
   $('text-menu-title').textContent = textEdit ? 'テキストを入力中' : selectedText() ? '選択したテキスト' : 'テキストを配置';
   $('text-mode-hint').textContent = textEdit ? '文字の書式は選択範囲に、配置は選択した行に反映されます。'
@@ -137,7 +142,7 @@ function updateControls() {
     ? 'クリックまたは「内容を編集」で再編集。ドラッグ・方向キーで移動、Deleteで削除。Escまたは紙面の空白をクリックして選択を解除すると、ほかのツールを使えます。'
     : '外側クリック・Ctrl+Enter・Escで入力を確定。「入力を取り消す」で変更を取り消します。書式は上の「テキスト」アイコンから設定できます。';
   $('open-text').hidden = !model.pages.length;
-  $('open-text').disabled = busy || !model.active;
+  $('open-text').disabled = busy || !model.active || strokeSelected;
   $('open-text').setAttribute('aria-pressed', String(textSelected || activePreviewMenu === 'text'));
   $('open-text').setAttribute('aria-expanded', String(!$('panel-text').hidden));
   $('open-text').setAttribute('aria-label', textSelected ? 'テキストの書式設定' : 'テキストボックスを配置');
@@ -166,11 +171,14 @@ function updateControls() {
     $(`panel-${name}`).hidden = !open;
     $(`open-${name}`).disabled = busy || !model.pages.length;
     $(`open-${name}`).setAttribute('aria-expanded', String(open));
-    $(`open-${name}`).setAttribute('aria-pressed', String(activePreviewMenu === name));
+    $(`open-${name}`).setAttribute('aria-pressed', String(name === 'pen' ? strokeSelected || activePreviewMenu === name : activePreviewMenu === name));
   }
   for (const name of ['select', ...previewMenus]) {
     $(`open-${name}`).disabled ||= textSelected;
+    if (name !== 'pen') $(`open-${name}`).disabled ||= strokeSelected;
   }
+  $('open-pen').setAttribute('aria-label', strokeSelected ? '描画の書式設定' : 'ペン');
+  $('open-pen').title = strokeSelected ? '選択した描画の書式設定を開く・閉じる' : toolDescriptions['open-pen'];
   const selected = selectedAnnotation();
   $('watermark-menu-title').textContent = selected?.tool === 'watermark' ? '選択した透かし' : '透かしの設定';
   $('close-watermark').textContent = selected?.tool === 'watermark' ? '選択を解除' : '選択に戻る';
@@ -181,7 +189,7 @@ function updateControls() {
 }
 
 function refresh() {
-  if (selectedText()) selectAnnotation(selectedText());
+  if (selectedAnnotation()) selectAnnotation(selectedAnnotation(), { preserve: true });
   const hasPages = model.pages.length > 0;
   if (!hasPages) { previewMenuOpen = false; penEnabled = false; textEnabled = false; resetPreviewMenu(); }
   for (const name of previewMenus) $(`open-${name}`).hidden = !hasPages;
@@ -686,11 +694,6 @@ $('save-dialog').addEventListener('cancel', event => { if (busy) event.preventDe
 on('print', printPdf);
 on('save', async () => { await exportPdf(); $('save-dialog').close(); });
 on('split', async () => { await splitPdf(); $('save-dialog').close(); });
-on('clear-ink', () => {
-  if (!model.active) return;
-  model.update(new Set([model.activeId]), p => ({ ...p, strokes: p.strokes.filter(item => item.tool === 'text') }));
-  refresh(); status('表示中のページの描画を消去しました。');
-});
 function watermarkTargets() { return $('watermark-scope').value === 'all' ? new Set(model.pages.map(p => p.id)) : new Set([activeRequired().id]); }
 on('apply-watermark', () => {
   const text = $('watermark-text').value.trim();
@@ -727,21 +730,23 @@ function resetPreviewMenu() {
   activePreviewMenu = 'select';
   $('rotation-scope').value = 'active';
   $('watermark-scope').value = 'all';
-  document.querySelectorAll('.bulk-actions').forEach(details => { details.open = false; });
 }
 function enableSelection(showMenu = false) {
   if (busy || stroke || annotationDrag || pageDrag || !finishTextEdit()) return;
   previewMenuOpen = showMenu;
   penEnabled = false; textEnabled = false; selectedAnnotationId = null;
+  selectedStrokeIds.clear();
   resetPreviewMenu(); refreshAnnotationHandles(); updateControls();
 }
 function togglePreviewMenu(name) {
   if (busy || stroke || annotationDrag || pageDrag || !model.active) return;
   if (name !== 'text' && (selectedText() || textEdit)) return;
+  if (name !== 'pen' && selectedStroke()) return;
   if (previewMenuOpen && !$(`panel-${name}`).hidden) {
     previewMenuOpen = false; updateControls(); return;
   }
   if (name === 'select') enableSelection(true);
+  else if (name === 'pen' && selectedStroke()) { previewMenuOpen = true; updateControls(); }
   else if (name === 'text') enableTextInsertion();
   else openPreviewMenu(name);
 }
@@ -755,6 +760,10 @@ function openPreviewMenu(name) {
   resetPreviewMenu();
   textEnabled = false; selectedAnnotationId = null;
   penEnabled = name === 'pen';
+  if (penEnabled) {
+    $('pen-width').value = '3'; $('pen-width-value').value = '3';
+    $('pen-transparency').value = '0'; $('pen-transparency-value').value = '0%';
+  }
   activePreviewMenu = name;
   previewMenuOpen = true;
   refreshAnnotationHandles(); updateControls();
@@ -767,8 +776,6 @@ for (const name of previewMenus) {
   });
 }
 $('start-pen').addEventListener('click', () => openPreviewMenu('pen'));
-$('pen-width').addEventListener('input', () => { $('pen-width-value').value = $('pen-width').value; });
-$('pen-transparency').addEventListener('input', () => { $('pen-transparency-value').value = `${$('pen-transparency').value}%`; });
 $('watermark-opacity').addEventListener('input', () => { $('watermark-opacity-value').value = `${$('watermark-opacity').value}%`; });
 
 function selectedText() {
@@ -797,10 +804,27 @@ function moveAnnotation(annotation, dx, dy) {
     ? moveText($('ink-canvas').getContext('2d'), annotation, viewport, dx, dy)
     : moveStroke(annotation, viewport, dx, dy);
 }
-function selectAnnotation(annotation) {
+function selectAnnotation(annotation, { toggle = false, preserve = false } = {}) {
+  const isStroke = !['text', 'watermark'].includes(annotation.tool);
+  if (toggle && isStroke) {
+    finishAnnotationFormatting();
+    const ids = new Set(selectedStrokes().map(item => item.id));
+    if (ids.has(annotation.id)) ids.delete(annotation.id); else ids.add(annotation.id);
+    selectedStrokeIds.clear(); ids.forEach(id => selectedStrokeIds.add(id));
+    selectedAnnotationId = ids.has(annotation.id) ? annotation.id : [...ids].at(-1) ?? null;
+    annotation = model.active.strokes.find(item => item.id === selectedAnnotationId);
+    if (!annotation) { refreshAnnotationHandles(); updateControls(); return; }
+  } else {
+    if (!preserve || !isStroke) selectedStrokeIds.clear();
+    if (isStroke) selectedStrokeIds.add(annotation.id);
+    selectedAnnotationId = annotation.id;
+  }
   resetPreviewMenu();
   penEnabled = false; textEnabled = false;
-  selectedAnnotationId = annotation.id;
+  if (isStroke) {
+    previewMenuOpen = false;
+    syncPenControls(annotation);
+  }
   if (annotation.tool === 'watermark') {
     $('watermark-text').value = annotation.text; $('watermark-color').value = annotation.color;
     $('watermark-opacity').value = annotation.opacity * 100;
@@ -818,10 +842,29 @@ function selectAnnotation(annotation) {
     syncTextFormatControls();
   } else { textEnabled = false; }
   $('text-handles').querySelectorAll('button').forEach(button => {
-    const selected = button.dataset.annotationId === selectedAnnotationId;
+    const selected = button.dataset.annotationId === selectedAnnotationId || (isStroke && selectedStrokeIds.has(button.dataset.annotationId));
     button.classList.toggle('selected', selected); button.setAttribute('aria-pressed', String(selected));
   });
   updateControls();
+}
+function selectedStrokes() {
+  if (!selectedStroke()) return [];
+  return model.active.strokes.filter(item => !['text', 'watermark'].includes(item.tool)
+    && (item.id === selectedAnnotationId || selectedStrokeIds.has(item.id)));
+}
+function syncPenControls(annotation = selectedStroke()) {
+  if (!annotation) return;
+  $('pen-color').value = annotation.color;
+  $('pen-width').value = annotation.width;
+  $('pen-width-value').value = $('pen-width').value;
+  const transparency = Math.round((1 - (annotation.opacity ?? 1)) * 100);
+  $('pen-transparency').value = transparency;
+  $('pen-transparency-value').value = `${transparency}%`;
+}
+function annotationPreview(annotation) {
+  return annotationDrag?.currents?.find(item => item.id === annotation.id)
+    || strokeFormatSession?.previews.get(annotation.id)
+    || (annotation.id === annotationFormatPreview?.id ? annotationFormatPreview : annotation);
 }
 function textSettings() {
   const fontSize = Number($('text-size').value);
@@ -875,7 +918,7 @@ function paintTextPreview() {
   if (!viewport || !model.active) return;
   paintOverlay($('ink-canvas').getContext('2d'), { ...model.active,
     strokes: model.active.strokes.filter(item => item.id !== textEdit?.original?.id)
-      .map(item => item.id === textFormatPreview?.id ? textFormatPreview : item) }, viewport);
+      .map(annotationPreview) }, viewport);
 }
 
 function positionTextEditor() {
@@ -955,6 +998,7 @@ function startTextEdit(annotation, isNew = false) {
 }
 
 function finishTextEdit(cancel = false) {
+  finishAnnotationFormatting();
   if (!textEdit) return true;
   if (!cancel && !updateTextDraft()) { textEdit.editor.focus({ preventScroll: true }); return false; }
   const { pageId, original, draft, editor } = textEdit;
@@ -982,7 +1026,7 @@ document.addEventListener('pointerdown', event => {
   if (event.button === 0 && event.isPrimary && !busy && !stroke && !annotationDrag && !pageDrag
     && (selectedAnnotationId || textEdit)
     && !event.target.closest('.canvas-stack, .preview-menu, button, input, select, textarea, a, label, summary, dialog, [contenteditable]')) {
-    finishTextFormatting();
+    finishAnnotationFormatting();
     enableSelection();
     // Invalid text must stay editable instead of losing focus on an outside click.
     if (textEdit) { event.preventDefault(); event.stopImmediatePropagation(); }
@@ -997,7 +1041,7 @@ document.addEventListener('pointerdown', event => {
     event.preventDefault(); event.stopImmediatePropagation();
     return;
   }
-  if (!event.target.closest('.text-settings')) finishTextFormatting();
+  if (!event.target.closest('.text-settings, .pen-style-settings')) finishAnnotationFormatting();
   if (event.target.closest('#confirm-text, #cancel-text, #close-text, #previous, #next, .preview-tool-button, .preview-zoom')) return;
   if (!textEdit || event.target === textEdit.editor || textEdit.editor.contains?.(event.target) || event.target.closest('.text-settings')) return;
   if (!finishTextEdit()) { event.preventDefault(); event.stopImmediatePropagation(); }
@@ -1042,23 +1086,78 @@ function previewTextFormatting(patch = textSettings()) {
   }
   if (!selectedText() || !viewport || busy) return;
   try {
-    const original = textFormatPreview || selectedText();
-    textFormatPreview = fitText(formatText(original, 0, original.text.length, patch, true));
+    const original = annotationFormatPreview || selectedText();
+    annotationFormatPreview = fitText(formatText(original, 0, original.text.length, patch, true));
     paintTextPreview(); refreshAnnotationHandles();
   } catch (error) {
-    textFormatPreview = null;
+    annotationFormatPreview = null;
     paintTextPreview(); refreshAnnotationHandles(); status(error.message, 'error');
   }
 }
-function finishTextFormatting() {
-  if (!textFormatPreview) return;
-  const annotation = textFormatPreview;
-  textFormatPreview = null;
-  const original = selectedText();
+function finishAnnotationFormatting() {
+  if (strokeFormatSession) {
+    const { originals, previews } = strokeFormatSession;
+    strokeFormatSession = null; annotationFormatPreview = null;
+    const changed = new Map(originals.flatMap(original => {
+      const current = previews.get(original.id);
+      return current && (current.color !== original.color || current.width !== original.width
+        || Math.abs((current.opacity ?? 1) - (original.opacity ?? 1)) > 1e-8) ? [[original.id, current]] : [];
+    }));
+    if (changed.size) {
+      model.update(new Set([model.activeId]), p => ({ ...p, strokes: p.strokes.map(item => changed.get(item.id) || item) }));
+      refreshThumbnails(); updateControls();
+    }
+    syncPenControls();
+    return;
+  }
+  if (!annotationFormatPreview) return;
+  const annotation = annotationFormatPreview;
+  annotationFormatPreview = null;
+  const original = selectedAnnotation();
   if (!original || annotation.id !== original.id || JSON.stringify(annotation) === JSON.stringify(original)) return;
+  if (original.tool !== 'text' && annotation.color === original.color && annotation.width === original.width
+    && (annotation.opacity ?? 1) === (original.opacity ?? 1)) return;
   model.update(new Set([model.activeId]), p => ({ ...p,
     strokes: p.strokes.map(item => item.id === annotation.id ? annotation : item) }));
-  refreshThumbnails(); updateControls(); syncTextFormatControls();
+  refreshThumbnails(); updateControls();
+  if (annotation.tool === 'text') syncTextFormatControls();
+}
+function previewStrokeFormatting(id, relativeDelta) {
+  $('pen-width-value').value = $('pen-width').value;
+  $('pen-transparency-value').value = `${$('pen-transparency').value}%`;
+  if (busy || stroke || annotationDrag || pageDrag || !viewport || !selectedStroke()) return;
+  strokeFormatSession ||= { originals: selectedStrokes(), anchor: selectedStroke(), previews: new Map() };
+  const { originals, anchor, previews } = strokeFormatSession;
+  const property = { 'pen-color': 'color', 'pen-width': 'width', 'pen-transparency': 'opacity' }[id];
+  let delta = relativeDelta ?? (Number($(id).value) - (property === 'width' ? anchor.width : Math.round((1 - (anchor.opacity ?? 1)) * 100)));
+  // Limit the shared delta, so reaching an edge never changes the balance within the selection.
+  if (property !== 'color') {
+    const minimum = Math.max(...originals.map(item => property === 'width' ? 1 - item.width : ((item.opacity ?? 1) - 1) * 100));
+    const maximum = Math.min(...originals.map(item => property === 'width' ? 40 - item.width : ((item.opacity ?? 1) - 0.05) * 100));
+    delta = Math.max(minimum, Math.min(maximum, delta));
+    if (Math.abs(delta) < 1e-8) delta = 0;
+  }
+  for (const original of originals) {
+    const current = previews.get(original.id) || original;
+    const value = property === 'color' ? $(id).value : property === 'width'
+      ? original.width + delta
+      : delta === 0 ? original.opacity ?? 1 : Math.max(0.05, Math.min(1, (original.opacity ?? 1) - delta / 100));
+    previews.set(original.id, { ...current, [property]: value });
+  }
+  annotationFormatPreview = previews.get(selectedAnnotationId);
+  if (property !== 'color') syncPenControls(annotationFormatPreview);
+  strokeFormatSession.control = { id, value: String($(id).value) };
+  paintTextPreview(); refreshAnnotationHandles();
+}
+for (const id of ['pen-color', 'pen-width', 'pen-transparency']) {
+  const preview = () => previewStrokeFormatting(id);
+  $(id).addEventListener('input', preview);
+  $(id).addEventListener('change', () => {
+    // Commit the live preview even when a fractional boundary rounds the displayed value.
+    if (strokeFormatSession?.control?.id !== id || strokeFormatSession.control.value !== String($(id).value)) preview();
+    finishAnnotationFormatting();
+  });
+  $(id).addEventListener('blur', finishAnnotationFormatting);
 }
 for (const id of ['text-color', 'text-size', 'text-font', 'text-align']) {
   const property = { 'text-color': 'color', 'text-size': 'fontSize', 'text-font': 'fontFamily', 'text-align': 'textAlign' }[id];
@@ -1070,8 +1169,8 @@ for (const id of ['text-color', 'text-size', 'text-font', 'text-align']) {
     previewTextFormatting({ [property]: value });
   };
   $(id).addEventListener('input', preview);
-  $(id).addEventListener('change', () => { preview(); finishTextFormatting(); });
-  $(id).addEventListener('blur', finishTextFormatting);
+  $(id).addEventListener('change', () => { preview(); finishAnnotationFormatting(); });
+  $(id).addEventListener('blur', finishAnnotationFormatting);
 }
 for (const style of ['bold', 'italic', 'underline']) {
   const button = $(`text-${style}`);
@@ -1089,7 +1188,7 @@ function toggleTextStyle(style) {
   const current = textEdit?.editor.getAnnotation?.() || textEdit?.draft || annotation, { start, end } = textFormatRange();
   const runs = styledRuns(current).filter(run => run.start < end && run.end > start);
   const value = !runs.length || !runs.every(run => run.style[style]);
-  previewTextFormatting({ [style]: value }); finishTextFormatting();
+  previewTextFormatting({ [style]: value }); finishAnnotationFormatting();
 }
 function handleTextShortcut(event) {
   if (busy || stroke || annotationDrag || pageDrag || !viewport || event.defaultPrevented
@@ -1109,27 +1208,63 @@ function handleTextShortcut(event) {
   if (!style && !step) return false;
   event.preventDefault(); event.stopPropagation();
   if (style) { if (!event.repeat) toggleTextStyle(style); }
-  else { previewTextFormatting(current => ({ fontSize: Math.max(8, Math.min(96, current.fontSize + step)) })); finishTextFormatting(); }
+  else { previewTextFormatting(current => ({ fontSize: Math.max(8, Math.min(96, current.fontSize + step)) })); finishAnnotationFormatting(); }
+  return true;
+}
+function handlePenShortcut(event) {
+  if (busy || stroke || annotationDrag || pageDrag || !viewport || !model.active || event.defaultPrevented
+    || event.isComposing || event.keyCode === 229 || event.altKey || event.shiftKey
+    || (!event.ctrlKey && !event.metaKey) || textEdit || selectedText()
+    || $('help-dialog').open || $('save-dialog').open || $('fullscreen-preview').open) return false;
+  if (!selectedStroke() && !penEnabled) return false;
+  if (event.target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) return false;
+  const widthStep = { ArrowUp: 1, ArrowDown: -1 }[event.key];
+  const transparencyStep = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
+  if (!widthStep && !transparencyStep) return false;
+  event.preventDefault(); event.stopPropagation();
+  finishAnnotationFormatting();
+  const current = annotationFormatPreview || selectedStroke();
+  const id = widthStep ? 'pen-width' : 'pen-transparency';
+  const value = current ? (widthStep ? current.width : Math.round((1 - (current.opacity ?? 1)) * 100)) : Number($(id).value);
+  $(id).value = Math.max(widthStep ? 1 : 0, Math.min(widthStep ? 40 : 95, value + (widthStep || transparencyStep)));
+  previewStrokeFormatting(id, widthStep || transparencyStep); finishAnnotationFormatting();
   return true;
 }
 function deleteSelectedAnnotation() {
   const annotation = selectedAnnotation();
   if (!annotation) return;
+  const ids = new Set(selectedStrokes().length ? selectedStrokes().map(item => item.id) : [annotation.id]);
   model.update(new Set([model.activeId]), p => annotation.tool === 'watermark' ? { ...p, watermark: null }
-    : { ...p, strokes: p.strokes.filter(item => item.id !== annotation.id) });
+    : { ...p, strokes: p.strokes.filter(item => !ids.has(item.id)) });
   resetPreviewMenu();
-  selectedAnnotationId = null; refresh(); status(`選択した${annotation.tool === 'text' ? 'テキスト' : annotation.tool === 'watermark' ? '透かし' : '描画'}を削除しました。「元に戻す」で復元できます。`);
+  selectedAnnotationId = null; selectedStrokeIds.clear(); refresh(); status(`選択した${annotation.tool === 'text' ? 'テキスト' : annotation.tool === 'watermark' ? '透かし' : `描画${ids.size > 1 ? `（${ids.size}件）` : ''}`}を削除しました。「元に戻す」で復元できます。`);
 }
 on('delete-text', deleteSelectedAnnotation);
 on('delete-stroke', deleteSelectedAnnotation);
 function moveSelectedAnnotation(dx, dy) {
   const original = selectedAnnotation();
   if (!original || !viewport) return;
+  if (selectedStrokes().length > 1) {
+    const originals = selectedStrokes(), currents = moveStrokesTogether(originals, dx * viewport.scale, dy * viewport.scale);
+    if (Math.hypot(currents[0].points[0][0] - originals[0].points[0][0], currents[0].points[0][1] - originals[0].points[0][1]) < 1e-8) return;
+    model.update(new Set([model.activeId]), p => replaceStrokes(p, currents));
+    paintTextPreview(); refreshAnnotationHandles(); refreshThumbnails(); updateControls(); return;
+  }
   const moved = moveAnnotation(original, dx * viewport.scale, dy * viewport.scale);
   // A key pressed against the paper edge must not create history or clear Redo.
   if (Math.hypot(moved.points[0][0] - original.points[0][0], moved.points[0][1] - original.points[0][1]) < 1e-8) return;
   model.update(new Set([model.activeId]), p => replaceAnnotation(p, original, moved));
   paintTextPreview(); refreshAnnotationHandles(); refreshThumbnails(); updateControls();
+}
+function moveStrokesTogether(originals, dx, dy) {
+  const bounds = originals.map(item => strokeLayout(item, viewport));
+  dx = Math.max(-Math.min(...bounds.map(b => b.left)), Math.min(viewport.width - Math.max(...bounds.map(b => b.right)), dx));
+  dy = Math.max(-Math.min(...bounds.map(b => b.top)), Math.min(viewport.height - Math.max(...bounds.map(b => b.bottom)), dy));
+  return originals.map(item => moveStroke(item, viewport, dx, dy));
+}
+function replaceStrokes(page, currents) {
+  const replacements = new Map(currents.map(item => [item.id, item]));
+  return { ...page, strokes: page.strokes.map(item => replacements.get(item.id) || item) };
 }
 function positionAnnotationHandle(button, annotation) {
   const layout = annotation.tool === 'text'
@@ -1150,21 +1285,24 @@ function refreshAnnotationHandles() {
     const button = existing || document.createElement('button');
     handles.delete(annotation.id);
     const isText = annotation.tool === 'text';
-    button.type = 'button'; button.className = `text-handle${isText ? '' : ' stroke-handle'}${annotation.id === selectedAnnotationId ? ' selected' : ''}`;
+    const selected = annotation.id === selectedAnnotationId || (selectedStroke() && selectedStrokeIds.has(annotation.id));
+    button.type = 'button'; button.className = `text-handle${isText ? '' : ' stroke-handle'}${selected ? ' selected' : ''}`;
     button.dataset.annotationId = annotation.id;
     if (isText) button.dataset.textId = annotation.id;
     button.setAttribute('aria-label', isText ? `テキストを移動: ${annotation.text}` : annotation.tool === 'watermark' ? `透かしを選択・移動: ${annotation.text}` : '描画を選択・移動');
-    button.setAttribute('aria-pressed', String(annotation.id === selectedAnnotationId));
+    button.setAttribute('aria-pressed', String(!!selected));
     button.title = 'クリックまたはF2で内容を編集。Ctrl+B/I/Uで太字・斜体・下線、Ctrl+↑/↓でサイズ変更。ドラッグ・方向キーで移動、Deleteで削除。';
     if (!isText) button.title = 'クリックで選択。ドラッグで移動。方向キーで1pt、Shift＋方向キーで10pt移動。Deleteで削除。';
-    button.setAttribute('aria-keyshortcuts', `${isText ? 'F2 Control+b Control+i Control+u Control+ArrowUp Control+ArrowDown ' : ''}Delete ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown`);
-    positionAnnotationHandle(button, annotation.id === textFormatPreview?.id ? textFormatPreview : annotation);
+    const isStroke = !isText && annotation.tool !== 'watermark';
+    if (isStroke) button.title += ' Shift＋クリックで追加選択・解除。Ctrl＋↑／↓で太さ、Ctrl＋←／→で透明度を相対変更。';
+    button.setAttribute('aria-keyshortcuts', `${isText ? 'F2 Control+b Control+i Control+u Control+ArrowUp Control+ArrowDown ' : isStroke ? 'Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight ' : ''}Delete ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown`);
+    positionAnnotationHandle(button, annotationPreview(annotation));
     if (existing) continue;
     const currentText = () => pageAnnotations().find(item => item.id === button.dataset.annotationId);
     button.addEventListener('dragstart', event => event.preventDefault());
     button.addEventListener('click', event => {
       if (event.detail === 0 && !busy && currentText()) {
-        if (isText) startTextEdit(currentText()); else selectAnnotation(currentText());
+        if (isText) startTextEdit(currentText()); else selectAnnotation(currentText(), { toggle: isStroke && (event.shiftKey || event.ctrlKey || event.metaKey) });
       }
     });
     button.addEventListener('dblclick', () => { if (isText && !busy && currentText()) startTextEdit(currentText()); });
@@ -1174,10 +1312,13 @@ function refreshAnnotationHandles() {
       if (!annotation) return;
       event.preventDefault();
       if (isText) previewMenuOpen = false;
-      selectAnnotation(annotation); button.focus({ preventScroll: true });
+      const toggle = isStroke && (event.shiftKey || event.ctrlKey || event.metaKey);
+      selectAnnotation(annotation, { toggle, preserve: isStroke && selectedStrokes().some(item => item.id === annotation.id) });
+      button.focus({ preventScroll: true });
+      if (toggle) return;
       button.setPointerCapture(event.pointerId);
       annotationDrag = { pageId: model.activeId, pointerId: event.pointerId, original: annotation, current: annotation,
-        start: canvasPoint(event), button };
+        originals: selectedStrokes().length > 1 ? selectedStrokes() : null, start: canvasPoint(event), button };
     });
     button.addEventListener('pointermove', updateAnnotationDrag);
     button.addEventListener('pointerup', finishAnnotationDrag);
@@ -1201,6 +1342,12 @@ function updateAnnotationDrag(event) {
   const scale = $('ink-canvas').getBoundingClientRect().width / viewport.width;
   if (!annotationDrag.moved && Math.hypot(point[0] - annotationDrag.start[0], point[1] - annotationDrag.start[1]) * scale < 4) return;
   annotationDrag.moved = true;
+  if (annotationDrag.originals) {
+    annotationDrag.currents = moveStrokesTogether(annotationDrag.originals, point[0] - annotationDrag.start[0], point[1] - annotationDrag.start[1]);
+    annotationDrag.current = annotationDrag.currents.find(item => item.id === annotationDrag.original.id);
+    refreshAnnotationHandles();
+    paintOverlay($('ink-canvas').getContext('2d'), replaceStrokes(model.active, annotationDrag.currents), viewport); return;
+  }
   annotationDrag.current = moveAnnotation(annotationDrag.original, point[0] - annotationDrag.start[0], point[1] - annotationDrag.start[1]);
   positionAnnotationHandle(annotationDrag.button, annotationDrag.current);
   paintOverlay($('ink-canvas').getContext('2d'), replaceAnnotation(model.active, annotationDrag.original, annotationDrag.current), viewport);
@@ -1208,11 +1355,11 @@ function updateAnnotationDrag(event) {
 function finishAnnotationDrag(event) {
   if (!annotationDrag || event.pointerId !== annotationDrag.pointerId) return;
   updateAnnotationDrag(event);
-  const { pageId, original, current, button, pointerId, moved } = annotationDrag; annotationDrag = null;
+  const { pageId, original, current, currents, button, pointerId, moved } = annotationDrag; annotationDrag = null;
   if (button.hasPointerCapture(pointerId)) button.releasePointerCapture(pointerId);
   const [x, y] = original.points[0]; const [nextX, nextY] = current.points[0];
   if (Math.hypot(nextX - x, nextY - y) > 0.01) {
-    model.update(new Set([pageId]), p => replaceAnnotation(p, original, current));
+    model.update(new Set([pageId]), p => currents ? replaceStrokes(p, currents) : replaceAnnotation(p, original, current));
     refreshThumbnails(); status(`${original.tool === 'text' ? 'テキスト' : '描画'}を移動しました。「元に戻す」で取り消せます。`, 'success');
     refreshAnnotationHandles();
   }
@@ -1300,6 +1447,7 @@ createFullscreenPreview({ getPreview(index = model.pages.indexOf(model.active)) 
 document.addEventListener('keydown', event => {
   if ($('fullscreen-preview').open) return;
   if (handleTextShortcut(event)) return;
+  if (handlePenShortcut(event)) return;
   if (event.key === 'Escape' && !event.repeat && !busy && !event.defaultPrevented && !event.isComposing && !$('help-dialog').open && !$('save-dialog').open) {
     event.preventDefault();
     cancelAnnotationDrag(); finishPageDrag();

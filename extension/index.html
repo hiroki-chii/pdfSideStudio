@@ -52,7 +52,7 @@
             <div class="preview-menu-layer">
             <section id="panel-select" class="preview-menu" aria-labelledby="select-menu-title" hidden>
               <div class="preview-menu-heading"><h2 id="select-menu-title">オブジェクトを選択</h2></div>
-              <p class="tool-hint">プレビュー上のテキスト・描画・透かしをクリックして選択してください。選択したオブジェクトの設定が表示されます。</p>
+              <p class="tool-hint">プレビュー上のテキスト・描画・透かしをクリックして選択してください。ペン線・図形はShift＋クリックで追加選択・解除できます。</p>
               <p class="subtle">選択後はドラッグで移動、Deleteキーで削除できます。新しく描く・文字を追加するときは上のツールを選びます。元のPDFの文字や画像は選択できません。</p>
             </section>
             <section id="panel-rotation" class="preview-menu" aria-labelledby="rotation-menu-title" hidden>
@@ -65,15 +65,17 @@
             <section id="panel-pen" class="preview-menu" aria-labelledby="pen-menu-title" hidden>
               <div class="preview-menu-heading"><h2 id="pen-menu-title">ペンの設定</h2><button id="close-pen" type="button">描画を終了</button></div>
               <p id="pen-mode-hint" class="tool-hint">紙面をドラッグして描きます。終了するには「描画を終了」かEsc。</p>
-              <div id="pen-drawing-settings">
-              <div class="inline-field"><label class="scope-label" for="pen-tool">描く形</label><select id="pen-tool"><option value="pen">フリーハンド</option><option value="line">直線</option><option value="ellipse">丸（楕円）</option><option value="rectangle">四角（長方形）</option></select></div>
-              <div class="pen-settings"><label>色 <input id="pen-color" type="color" value="#e05267" /></label><label class="range-label">太さ <input id="pen-width" type="range" min="1" max="40" value="3" /><output id="pen-width-value">3</output></label></div>
-              <label class="pen-opacity range-label" for="pen-transparency">透明度 <input id="pen-transparency" type="range" min="0" max="95" value="0" /><output id="pen-transparency-value">0%</output></label>
-              <p class="tool-hint">透明度を上げるとマーカーに。丸・四角はShiftを押しながらドラッグすると正円・正方形になります。</p>
-              <p class="subtle">設定は次に描く線・図形に適用されます。</p>
-              <details class="bulk-actions"><summary>このページの描画をまとめて消去</summary><p class="subtle">ペン・図形をすべて消去します。テキストは残ります。</p><button id="clear-ink" class="danger" type="button">このページの全描画を消去</button></details>
+              <div id="pen-shape-settings" class="inline-field"><label class="scope-label" for="pen-tool">描く形</label><select id="pen-tool"><option value="pen">フリーハンド</option><option value="line">直線</option><option value="ellipse">丸（楕円）</option><option value="rectangle">四角（長方形）</option></select></div>
+              <div class="pen-style-settings">
+              <div class="pen-settings"><label>色 <input id="pen-color" type="color" value="#e05267" /></label><label class="range-label">太さ <input id="pen-width" type="range" min="1" max="40" value="3" aria-keyshortcuts="Control+ArrowUp Control+ArrowDown" /><output id="pen-width-value">3</output></label></div>
+              <label class="pen-opacity range-label" for="pen-transparency">透明度 <input id="pen-transparency" type="range" min="0" max="95" value="0" aria-keyshortcuts="Control+ArrowLeft Control+ArrowRight" /><output id="pen-transparency-value">0%</output></label>
+              <p class="subtle">Ctrl＋↑／↓: 太さを1ptずつ増やす／減らす。Ctrl＋←／→: 透明度を1%ずつ下げる／上げる。Shift＋クリックで複数選択すると、それぞれの元の値に同じ増減を加えます。1つでも上限・下限に達したら全体を止め、描画同士の差を保ちます。</p>
               </div>
-              <div id="stroke-selection-actions" hidden><div class="action-grid"><button id="start-pen" type="button">新しく描く</button><button id="delete-stroke" class="danger">選択した描画を削除</button></div><p class="subtle">ドラッグまたは方向キーで移動。Shift＋方向キーで10pt移動。「元に戻す」で移動・削除を取り消せます。</p></div>
+              <div id="pen-drawing-settings">
+              <p class="tool-hint">透明度を上げるとマーカーに。丸・四角はShiftを押しながらドラッグすると正円・正方形になります。</p>
+              <p class="subtle">描画モードを開始すると太さ3pt・透明度0%に戻ります。設定は次に描く線・図形に適用されます。</p>
+              </div>
+              <div id="stroke-selection-actions" hidden><div class="action-grid"><button id="start-pen" type="button">新しく描く</button><button id="delete-stroke" class="danger">選択した描画を削除</button></div><p class="subtle">ドラッグまたは方向キーで移動。Shift＋方向キーで10pt移動。「元に戻す」で書式変更・移動・削除を取り消せます。Escまたは空白クリックで選択を解除します。</p></div>
             </section>
             <section id="panel-watermark" class="preview-menu" aria-labelledby="watermark-menu-title" hidden>
               <div class="preview-menu-heading"><h2 id="watermark-menu-title">透かしの設定</h2><button id="close-watermark" type="button">選択に戻る</button></div>
