@@ -26,7 +26,7 @@ async function setup(rotation = 0, scale = 1) {
       getContext: () => canvas.getContext('2d') });
     return nodes.get(id);
   };
-  $('stamp-size').value = '24'; $('stamp-color').value = '#e05267'; $('stamp-pattern').value = 'plain';
+  $('stamp-size').value = '24'; $('stamp-color').value = '#000000'; $('stamp-pattern').value = 'plain';
   let id = 0;
   const errors = [];
   const context = vm.createContext({ $, model, viewport, textLayout, moveText, paintOverlay,
@@ -227,14 +227,14 @@ test('placed numbers survive PDF export as visible overlays on rotated pages', a
   const output = createCanvas(viewport.width, viewport.height);
   await page.render({ canvasContext: output.getContext('2d'), viewport: page.getViewport({ scale: 1 }) }).promise;
   const data = output.getContext('2d').getImageData(0, 0, output.width, output.height).data;
-  const redPixels = (left, right) => {
+  const blackPixels = (left, right) => {
     let count = 0;
     for (let y = 70; y < 130; y++) for (let x = left; x < right; x++) {
       const i = (y * output.width + x) * 4;
-      if (data[i] > data[i + 1] + 40 && data[i] > data[i + 2] + 40) count++;
+      if (data[i] < 150 && data[i + 1] < 150 && data[i + 2] < 150) count++;
     }
     return count;
   };
-  assert.ok(redPixels(60, 100) > 20, 'first number is present in the saved PDF');
-  assert.ok(redPixels(140, 180) > 20, 'second number is present in the saved PDF');
+  assert.ok(blackPixels(60, 100) > 20, 'first black number is present in the saved PDF');
+  assert.ok(blackPixels(140, 180) > 20, 'second black number is present in the saved PDF');
 });

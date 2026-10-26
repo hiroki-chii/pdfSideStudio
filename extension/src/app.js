@@ -38,6 +38,7 @@ const selectedStrokeIds = new Set();
 const selectedTextIds = new Set();
 let annotationDrag = null;
 let textEnabled = false;
+let textInsertionColor = $('text-color').value;
 let textEdit = null;
 let annotationFormatPreview = null;
 let strokeFormatSession = null;
@@ -790,7 +791,6 @@ function selectAnnotation(annotation, { toggle = false, preserve = false } = {})
     $('watermark-scope').value = 'active';
   }
   if (annotation.tool === 'text') {
-    $('text-color').value = annotation.color;
     $('text-size').value = annotation.fontSize;
     $('text-font').value = annotation.fontFamily || 'sans-serif';
     $('text-align').value = annotation.textAlign || 'left';
@@ -859,6 +859,7 @@ function enableTextInsertion() {
   }
   if (!finishTextEdit()) return;
   previewMenuOpen = true;
+  $('text-color').value = textInsertionColor;
   resetTextBackgroundSettings();
   textEnabled = true; penEnabled = false; selectedAnnotationId = null;
   resetPreviewMenu(); activePreviewMenu = 'text'; refreshAnnotationHandles(); updateControls();
@@ -1016,7 +1017,7 @@ document.addEventListener('pointerdown', event => {
     return;
   }
   // Dismiss tool settings before the preview can start an editing gesture.
-  if (previewMenuOpen && (!$('panel-pen').hidden || !$('panel-text').hidden)
+  if (previewMenuOpen && (!$('panel-pen').hidden || !$('panel-text').hidden || !$('panel-stamp').hidden)
     && event.target.closest('#preview-scroll') && !event.target.closest('.text-editor')
     && event.button === 0 && event.isPrimary) {
     previewMenuOpen = false;
@@ -1049,6 +1050,8 @@ function syncTextFormatControls() {
   const style = anchorRuns[0]?.style || textStyle(annotation);
   const runs = textEdit ? anchorRuns : selectedTexts().flatMap(item => styledRuns(textFormatSession?.previews.get(item.id) || item));
   $('text-size').value = style.fontSize; $('text-color').value = style.color;
+  // Numbers use the text editor, but must not replace the next text box's color.
+  if (!annotation.stampPattern) textInsertionColor = style.color;
   $('text-font').value = style.fontFamily; $('text-align').value = style.textAlign;
   const background = textBackground(annotation);
   $('text-background').value = background.color;
@@ -1214,6 +1217,7 @@ for (const id of ['text-color', 'text-size', 'text-font', 'text-align', 'text-ba
       if (!Number.isFinite(value) || value < 0 || value > 1) return;
       $('text-background-opacity-value').value = `${$(id).value}%`;
     }
+    if (id === 'text-color' && !(textEdit?.draft || selectedText())?.stampPattern) textInsertionColor = value;
     previewTextFormatting({ [property]: value });
     if (textFormatSession) textFormatSession.control = { id, value: String($(id).value) };
   };

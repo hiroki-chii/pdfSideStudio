@@ -67,7 +67,7 @@ function setup() {
     },
     busy: false, selectedAnnotationId: 'text', selectedStrokeIds: new Set(), selectedTextIds: new Set(),
     annotationFormatPreview: null, strokeFormatSession: null, textFormatSession: null, textEdit: null,
-    textEnabled: false, penEnabled: false, activePreviewMenu: 'text',
+    textEnabled: false, textInsertionColor: '#222222', penEnabled: false, activePreviewMenu: 'text',
     previewMenuOpen: false, stroke: null, annotationDrag: null, pageDrag: null,
     previewMenus: ['rotation', 'pen', 'watermark'], previewZoom: 1, minPreviewZoom: 0.5, maxPreviewZoom: 4,
     toolDescriptions: { 'open-text': '配置' },
@@ -102,6 +102,40 @@ test('editing framed and filled stamps preserves the frame, padded position, con
     assert.equal(model.active.strokes[0].stampPattern, stampPattern);
     model.undo(); assert.equal(model.active.strokes[0].text, '12');
     model.redo(); assert.equal(model.active.strokes[0].text, '123');
+  }
+});
+
+test('text and stamp colors stay independent after stamp selection, editing and new text insertion', () => {
+  for (const stampPattern of ['plain', 'circle', 'circle-filled', 'square', 'square-filled']) {
+    const { context, $, model, original } = setup();
+    context.enableSelection(); context.enableTextInsertion();
+    $('text-color').value = '#004488'; $('text-color').handlers.change();
+    $('stamp-color').value = '#e05267'; $('stamp-size').value = '24'; $('stamp-pattern').value = stampPattern;
+    let id = 0;
+    Object.assign(context, { uid: () => `stamp-${++id}`, pdfPoint: () => [200, 300] });
+    vm.runInContext(slice('function placeNumberStamp(', "\n$('stamp-number').addEventListener"), context);
+    context.enableSelection(); context.placeNumberStamp({});
+    const stamp = model.active.strokes.at(-1);
+    assert.equal(stamp.color, '#e05267');
+    context.selectAnnotation(stamp);
+    assert.equal($('text-color').value, '#e05267');
+    // Returning from a number selection must restore the text insertion color.
+    context.enableSelection(); context.enableTextInsertion();
+    assert.equal(context.textSettings().color, '#004488');
+    context.enableSelection(); context.startTextEdit(stamp);
+    context.textEdit.editor.setSelectionRange(0, stamp.text.length);
+    $('text-color').value = '#226633'; $('text-color').handlers.change();
+    context.finishTextEdit();
+    assert.equal(styledRuns(model.active.strokes.at(-1))[0].style.color, '#226633');
+    context.enableSelection(); context.enableTextInsertion();
+    assert.equal(context.textSettings().color, '#004488');
+    assert.equal($('stamp-color').value, '#e05267');
+    context.startTextEdit({ ...original, ...context.textSettings(), id: 'new', text: '' }, true);
+    context.textEdit.editor.value = 'Separate text color'; context.finishTextEdit();
+    assert.equal(model.active.strokes.at(-1).color, '#004488');
+    context.enableSelection(); context.placeNumberStamp({});
+    assert.equal(model.active.strokes.at(-1).color, '#e05267');
+    assert.equal(model.active.strokes[0], original);
   }
 });
 

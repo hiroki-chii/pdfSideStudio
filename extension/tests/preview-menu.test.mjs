@@ -26,11 +26,13 @@ function setup(tool) {
     addEventListener(type, handler, capture) { documentHandlers[type] = { handler, capture }; },
   }, previewMenuOpen: true, penEnabled: tool === 'pen', textEnabled: tool === 'text',
   busy: false, stroke: null, annotationDrag: null, pageDrag: null, selectedAnnotationId: null, selectedStrokeIds: new Set(), selectedTextIds: new Set(),
-  activePreviewMenu: tool, textEdit: null, viewport: {},
+  activePreviewMenu: tool, textEdit: null, viewport: {}, renderedPageId: 'page',
   model: { activeId: 'page', active: { rotation: 0, strokes: [] },
     update() { calls.push('save-stroke'); } },
   updateControls() {
-    if (!context.previewMenuOpen) { $('panel-pen').hidden = true; $('panel-text').hidden = true; }
+    if (!context.previewMenuOpen) {
+      for (const name of ['pen', 'text', 'stamp']) $(`panel-${name}`).hidden = true;
+    }
   },
   finishAnnotationFormatting() { calls.push('format'); },
   finishTextEdit() { calls.push('commit-text'); return true; },
@@ -38,6 +40,7 @@ function setup(tool) {
   enableSelection() { calls.push('select'); }, uid: () => 'annotation',
   textSettings: () => ({}), pdfPoint: event => [event.clientX, event.clientY],
   startTextEdit() { calls.push('place-text'); },
+  placeNumberStamp() { calls.push('place-stamp'); },
   paintOverlay() { calls.push('paint'); }, fail(error) { throw error; },
   });
   vm.runInContext(dismissalScript + '\n' + drawingScript, context);
@@ -120,7 +123,7 @@ test('settings, controls, object clicks and non-editing gestures do not clear se
   }
 });
 
-for (const tool of ['pen', 'text']) {
+for (const tool of ['pen', 'text', 'stamp']) {
   test(`${tool}: first preview gesture only closes the menu; next gesture edits`, () => {
     const { context, $, calls, pointerdown } = setup(tool);
     const first = pointerdown();
@@ -138,7 +141,7 @@ for (const tool of ['pen', 'text']) {
     if (tool === 'pen') {
       assert.equal(context.stroke.id, 'annotation');
       assert.ok(calls.includes('capture'));
-    } else assert.ok(calls.includes('place-text'));
+    } else assert.deepEqual(calls, ['format', tool === 'stamp' ? 'place-stamp' : 'place-text']);
   });
 
   test(`${tool}: clicking existing annotations or preview margins only dismisses`, () => {
@@ -152,8 +155,10 @@ for (const tool of ['pen', 'text']) {
 }
 
 test('menu controls, active text editor and non-primary pointers do not trigger dismissal', () => {
-  for (const options of [{ target: 'settings' }, { target: 'editor' }, { button: 2 }, { isPrimary: false }]) {
-    const { context, pointerdown } = setup('text');
+  for (const tool of ['pen', 'text', 'stamp']) for (const options of [
+    { target: 'settings' }, { target: 'editor' }, { button: 2 }, { isPrimary: false },
+  ]) {
+    const { context, pointerdown } = setup(tool);
     assert.equal(pointerdown(options).stopped, undefined);
     assert.equal(context.previewMenuOpen, true);
   }
