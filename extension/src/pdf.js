@@ -64,6 +64,14 @@ const textFonts = {
   'sans-serif': '"Noto Sans JP", "Yu Gothic", "Meiryo", sans-serif',
   serif: '"Noto Serif JP", "Yu Mincho", "MS PMincho", serif',
   monospace: '"BIZ UDGothic", "MS Gothic", monospace',
+  'biz-udp-gothic': '"BIZ UDPGothic", "Yu Gothic", "Meiryo", sans-serif',
+  'noto-sans': '"Noto Sans JP", "Noto Sans", "Yu Gothic", "Meiryo", sans-serif',
+  'noto-serif': '"Noto Serif JP", "Noto Serif", "Yu Mincho", "MS PMincho", serif',
+  meiryo: '"Meiryo", "Yu Gothic", "Noto Sans JP", sans-serif',
+  'yu-gothic': '"Yu Gothic", "Meiryo", "Noto Sans JP", sans-serif',
+  'yu-mincho': '"Yu Mincho", "MS PMincho", "Noto Serif JP", serif',
+  'ms-gothic': '"MS Gothic", "BIZ UDGothic", monospace',
+  'ms-mincho': '"MS Mincho", "Yu Mincho", "Noto Serif JP", serif',
 };
 export const textFontFamily = family => textFonts[family] || textFonts['sans-serif'];
 export const textFont = (size, annotation = {}) => `${annotation.italic ? 'italic ' : ''}${annotation.bold ? 700 : 400} ${size}px ${textFontFamily(annotation.fontFamily)}`;

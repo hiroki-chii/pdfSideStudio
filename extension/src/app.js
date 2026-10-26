@@ -14,6 +14,9 @@ import { readPdfSource, pdfErrorMessage } from './pdf-source.js';
 import { createToolHelp } from './tool-help.js';
 
 const $ = id => document.getElementById(id);
+for (const option of $('text-font').options) {
+  option.style.fontFamily = textFontFamily(option.value);
+}
 createToolHelp(document);
 let themeStorage;
 try { themeStorage = window.localStorage; } catch { /* Theme still works without storage. */ }

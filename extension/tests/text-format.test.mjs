@@ -8,6 +8,9 @@ import { textFont, textFontFamily, textLayout, moveText, moveStroke, strokeLayou
 import { styledRuns, textStyle, textBackground, formatTextBackground, formatText, replaceText } from '../src/text-format.js';
 
 const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
+const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+const fontOptions = [...html.match(/<select id="text-font">([\s\S]*?)<\/select>/)[1]
+  .matchAll(/<option value="([^"]+)">([^<]+)<\/option>/g)].map(([, value, label]) => ({ value, label }));
 const slice = (start, end) => app.slice(app.indexOf(start), app.indexOf(end));
 const script = [
   slice('function enableSelection(', '\nfunction togglePreviewMenu('),
@@ -782,11 +785,11 @@ test('formatting an active editor preserves multiline text, commits once and can
   context.startTextEdit(original);
   context.textEdit.editor.value = '日本語\nPDF';
   context.textEdit.editor.setSelectionRange(0, context.textEdit.editor.value.length);
-  $('text-font').value = 'monospace'; $('text-font').handlers.change();
+  $('text-font').value = 'biz-udp-gothic'; $('text-font').handlers.change();
   $('text-align').value = 'center'; $('text-align').handlers.change();
   for (const style of ['bold', 'italic', 'underline']) $(`text-${style}`).handlers.click();
   const { editor } = context.textEdit;
-  assert.ok(styledRuns(context.textEdit.draft).every(run => run.style.fontFamily === 'monospace'
+  assert.ok(styledRuns(context.textEdit.draft).every(run => run.style.fontFamily === 'biz-udp-gothic'
     && run.style.bold && run.style.italic && run.style.underline && run.style.textAlign === 'center'));
   assert.equal(model.past.length, history);
   assert.equal(context.finishTextEdit(), true);
@@ -803,10 +806,52 @@ test('formatting an active editor preserves multiline text, commits once and can
   assert.deepEqual(errors, []);
 });
 
+test('the font menu offers ten distinct choices with Noto Sans and Meiryo mapped to their own families', () => {
+  const expected = ['sans-serif', 'serif', 'biz-udp-gothic', 'noto-sans', 'noto-serif', 'meiryo',
+    'yu-gothic', 'yu-mincho', 'ms-gothic', 'ms-mincho'];
+  assert.deepEqual(fontOptions.map(option => option.value), expected);
+  assert.match(fontOptions.find(option => option.value === 'noto-sans').label, /Noto Sans/);
+  assert.equal(fontOptions.find(option => option.value === 'meiryo').label, 'メイリオ');
+  assert.ok(fontOptions.every(option => option.value !== 'monospace' && option.label !== '等幅'));
+  assert.equal(fontOptions.find(option => option.value === 'biz-udp-gothic').label, 'BIZ UDPゴシック');
+  const namedFamilies = ['BIZ UDPGothic', 'Noto Sans JP', 'Noto Serif JP', 'Meiryo', 'Yu Gothic', 'Yu Mincho', 'MS Gothic', 'MS Mincho'];
+  expected.slice(2).forEach((value, index) => {
+    assert.ok(textFontFamily(value).startsWith(`"${namedFamilies[index]}",`));
+    assert.match(textFontFamily(value), /(?:sans-serif|serif|monospace)$/);
+  });
+  assert.equal(textFontFamily('unknown'), textFontFamily('sans-serif'));
+});
+
+test('all ten fonts apply to boxes and selected characters and survive commit, re-edit and history', () => {
+  for (const { value: fontFamily } of fontOptions) {
+    const { context, $, model, original, errors } = setup();
+    $('text-font').value = fontFamily; $('text-font').handlers.change();
+    const formatted = model.active.strokes[0];
+    assert.equal(textStyle(formatted).fontFamily, fontFamily);
+    context.startTextEdit(formatted);
+    assert.equal($('text-font').value, fontFamily);
+    context.textEdit.editor.setSelectionRange(0, 4);
+    const partialFont = fontFamily === 'meiryo' ? 'noto-sans' : 'meiryo';
+    $('text-font').value = partialFont; $('text-font').handlers.change();
+    assert.equal(context.finishTextEdit(), true);
+    const committed = model.active.strokes[0];
+    const runs = styledRuns(committed);
+    assert.equal(runs[0].text, 'Long');
+    assert.equal(runs[0].style.fontFamily, partialFont);
+    assert.ok(runs.slice(1).every(run => run.style.fontFamily === fontFamily));
+    model.undo(); assert.equal(model.active.strokes[0], formatted);
+    model.redo(); assert.equal(model.active.strokes[0], committed);
+    context.startTextEdit(committed);
+    assert.equal(context.finishTextEdit(), true);
+    assert.equal(model.active.strokes[0].text, original.text);
+    assert.deepEqual(errors, []);
+  }
+});
+
 test('formatted text measures its font and aligns shorter lines within the longest line', () => {
   const { context, original } = setup();
   const ctx = createCanvas(600, 800).getContext('2d');
-  for (const fontFamily of ['sans-serif', 'serif', 'monospace']) {
+  for (const { value: fontFamily } of fontOptions) {
     for (const [textAlign, factor] of [['left', 0], ['center', 0.5], ['right', 1]]) {
       const annotation = { ...original, fontFamily, textAlign, bold: true, italic: true };
       const layout = textLayout(ctx, annotation, context.viewport);
