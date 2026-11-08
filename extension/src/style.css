@@ -90,6 +90,13 @@ dialog.fullscreen-preview{position:fixed;inset:0;width:100vw;height:100dvh;max-w
 .tool-settings-group legend{padding:0 5px;font-size:11px;font-weight:650;color:var(--muted)}
 .tool-settings label{display:flex;align-items:center;gap:6px;font-size:11px}
 .tool-settings .tool-field{display:grid;grid-template-columns:5em minmax(0,1fr);gap:6px}
+#text-box-shape-field{grid-template-columns:7em minmax(0,1fr)}
+.text-tail-hit-area{position:absolute;left:-1px;top:-1px;width:100%;height:100%;overflow:visible;pointer-events:none}
+.text-tail-hit-area polygon{fill:transparent;stroke:transparent;stroke-width:8px;stroke-linejoin:round;pointer-events:visible}
+.text-handle.selected .text-tail-hit-area polygon{fill:#6553c722}
+#text-tail-handle{position:absolute;z-index:1;width:24px;height:24px;padding:0;border:0;background:transparent;transform:translate(-50%,-50%);pointer-events:auto;touch-action:none;cursor:move;display:grid;place-items:center}
+#text-tail-handle::after{content:"";width:11px;height:11px;border:2px solid #6553c7;border-radius:50%;background:#fff}
+#text-tail-handle:hover::after,#text-tail-handle:focus-visible::after{background:#e9e2ff}
 .tool-field input:not([type=color]),.tool-field select{width:100%}
 .tool-settings input:not([type=color]):not([type=range]),.tool-settings select{padding:5px 6px;font-size:11px}
 .tool-settings input[type=number]{width:64px}

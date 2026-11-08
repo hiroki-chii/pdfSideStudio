@@ -76,9 +76,35 @@ const textFonts = {
 export const textFontFamily = family => textFonts[family] || textFonts['sans-serif'];
 export const textFont = (size, annotation = {}) => `${annotation.italic ? 'italic ' : ''}${annotation.bold ? 700 : 400} ${size}px ${textFontFamily(annotation.fontFamily)}`;
 
+function textBubbleGeometry(size, width, height, offset) {
+  const lineWidth = size * 0.065, inset = lineWidth / 2, radius = size * 0.25;
+  const right = width - inset, bottom = height - inset;
+  const corners = [[inset, inset], [right, inset], [right, bottom], [inset, bottom]];
+  if (!offset) {
+    return { corners, lineWidth, radius, side: 2,
+      tail: [[size * 1.12, bottom], [size * 0.42, height + size * 0.42 - inset], [size * 0.68, bottom]] };
+  }
+  const tip = [...offset];
+  const dx = tip[0] / width - 0.5, dy = tip[1] / height - 0.5;
+  const side = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0);
+  const axis = side % 2, normal = 1 - axis;
+  const [start, end] = [corners[side], corners[(side + 1) % 4]];
+  const direction = Math.sign(end[axis] - start[axis]);
+  const halfBase = size * 0.22, margin = radius + halfBase;
+  const center = Math.max(margin, Math.min(Math.abs(end[axis] - start[axis]) - margin,
+    (tip[axis] - start[axis]) * direction));
+  const base = distance => axis === 0 ? [start[0] + distance * direction, start[1]]
+    : [start[0], start[1] + distance * direction];
+  // After text grows, keep the tail outside the new body.
+  const edge = start[normal] + (side === 1 || side === 2 ? lineWidth : -lineWidth);
+  tip[normal] = side === 1 || side === 2 ? Math.max(edge, tip[normal]) : Math.min(edge, tip[normal]);
+  return { corners, lineWidth, radius, side, tail: [base(center - halfBase), tip, base(center + halfBase)] };
+}
+
 export function textLayout(ctx, annotation, viewport) {
   const [x, y] = viewport.convertToViewportPoint(...annotation.points[0]);
   const size = annotation.fontSize * viewport.scale;
+  const isBubble = annotation.boxShape === 'bubble' && !annotation.stampPattern;
   const lines = annotation.text.split('\n'), lineRuns = [[]];
   for (const run of styledRuns(annotation)) {
     run.text.split('\n').forEach((text, index) => {
@@ -110,7 +136,7 @@ export function textLayout(ctx, annotation, viewport) {
     lineSizes.push(maxSize); lineStyles.push(runs[0]?.style || textStyle(annotation));
   }
   const lineWidths = metrics.map(metric => metric.width);
-  const contentWidth = Math.max(size * 0.2, ...lineWidths);
+  const contentWidth = Math.max(size * (isBubble ? 2.2 : 0.2), ...lineWidths);
   // Include glyph overhang (especially italics) in selection and page-edge checks.
   let insetLeft = Math.max(0, ...metrics.map(metric => metric.actualBoundingBoxLeft || 0));
   let insetRight = Math.max(0, ...metrics.map(metric => (metric.actualBoundingBoxRight || 0) - metric.width));
@@ -124,6 +150,14 @@ export function textLayout(ctx, annotation, viewport) {
     height += lineSizes[index] * 1.3;
   });
   const textHeight = height;
+  let bubble = null;
+  if (isBubble) {
+    const padding = size * 0.32;
+    insetLeft += padding; insetRight += padding;
+    width += 2 * padding; height += 2 * padding;
+    bubble = { padding, ...textBubbleGeometry(size, width, height, annotation.tailOffset?.map(value => value * viewport.scale)) };
+    lineRuns.flat().forEach(run => { run.x += padding; run.y += padding; });
+  }
   let stamp = null, stampInsetTop = 0, stampInsetBottom = 0;
   if (['circle', 'circle-filled', 'square', 'square-filled'].includes(annotation.stampPattern)) {
     const circle = annotation.stampPattern.startsWith('circle');
@@ -148,12 +182,33 @@ export function textLayout(ctx, annotation, viewport) {
     width = height = side;
   }
   const angle = ((viewport.rotation ?? 0) - annotation.rotation) * Math.PI / 180;
-  const corners = [[0, 0], [width, 0], [0, height], [width, height]].map(([dx, dy]) =>
-    [x + dx * Math.cos(angle) - dy * Math.sin(angle), y + dx * Math.sin(angle) + dy * Math.cos(angle)]);
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+  const toViewport = ([dx, dy]) => [x + dx * cos - dy * sin, y + dx * sin + dy * cos];
+  const corners = [[0, 0], [width, 0], [0, height], [width, height]].map(toViewport);
+  if (bubble) {
+    bubble.tip = toViewport(bubble.tail[1]);
+    const [tipX, tipY] = bubble.tip;
+    const inset = bubble.lineWidth / 2;
+    corners.push([tipX - inset, tipY - inset], [tipX + inset, tipY + inset]);
+  }
   return { x, y, size, width, height, contentWidth, insetLeft, insetRight, lines, lineWidths, lineOffsets, lineRuns, angle,
-    stamp, stampInsetTop, stampInsetBottom, textHeight,
+    bubble, stamp, stampInsetTop, stampInsetBottom, textHeight,
     left: Math.min(...corners.map(p => p[0])), right: Math.max(...corners.map(p => p[0])),
     top: Math.min(...corners.map(p => p[1])), bottom: Math.max(...corners.map(p => p[1])) };
+}
+
+export function moveTextTail(ctx, annotation, viewport, x, y) {
+  const layout = textLayout(ctx, annotation, viewport);
+  if (!layout.bubble) return annotation;
+  const { tip, lineWidth } = layout.bubble, inset = lineWidth / 2;
+  x = Math.max(inset, Math.min(viewport.width - inset, x));
+  y = Math.max(inset, Math.min(viewport.height - inset, y));
+  if (Math.hypot(x - tip[0], y - tip[1]) < 0.01 * viewport.scale) return annotation;
+  const dx = x - layout.x, dy = y - layout.y, cos = Math.cos(layout.angle), sin = Math.sin(layout.angle);
+  const localX = dx * cos + dy * sin, localY = dy * cos - dx * sin;
+  if (localX >= -inset && localX <= layout.width + inset && localY >= -inset && localY <= layout.height + inset) return annotation;
+  // Store the tip relative to the box in PDF points so it follows page rotation and box moves.
+  return { ...annotation, tailOffset: [localX / viewport.scale, localY / viewport.scale] };
 }
 
 export function moveText(ctx, annotation, viewport, dx, dy) {
@@ -218,12 +273,32 @@ export function scaleStrokes(strokes, viewport, factor) {
   }) }));
 }
 
+function paintTextBubble(ctx, { corners, lineWidth, radius, side, tail }, background) {
+  ctx.save();
+  ctx.lineWidth = lineWidth; ctx.lineJoin = 'round'; ctx.strokeStyle = '#444444';
+  ctx.beginPath();
+  ctx.moveTo(corners[0][0] + radius, corners[0][1]);
+  for (let edge = 0; edge < corners.length; edge++) {
+    if (edge === side) for (const point of tail) ctx.lineTo(...point);
+    ctx.arcTo(...corners[(edge + 1) % 4], ...corners[(edge + 2) % 4], radius);
+  }
+  ctx.closePath();
+  if (background.color !== 'none' && background.opacity > 0) {
+    ctx.fillStyle = background.color; ctx.globalAlpha = background.opacity;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
 function paintText(ctx, annotation, viewport, hideText = false) {
   const layout = textLayout(ctx, annotation, viewport);
   ctx.save();
   ctx.translate(layout.x, layout.y); ctx.rotate(layout.angle);
   const background = textBackground(annotation);
-  if (!layout.stamp && background.color !== 'none' && background.opacity > 0) {
+  if (layout.bubble) paintTextBubble(ctx, layout.bubble, background);
+  else if (!layout.stamp && background.color !== 'none' && background.opacity > 0) {
     ctx.save(); ctx.fillStyle = background.color; ctx.globalAlpha = background.opacity;
     ctx.fillRect(0, 0, layout.width, layout.height); ctx.restore();
   }

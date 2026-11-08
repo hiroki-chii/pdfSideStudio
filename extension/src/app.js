@@ -1,7 +1,7 @@
 import './style.css';
 import './theme.css';
 import { EditorModel, safeFilename, normalizeRotation } from './model.js';
-import { paintOverlay, textFontFamily, textLayout, moveText, strokeLayout, moveStroke, scaleStrokes, watermarkLayout, moveWatermark } from './pdf.js';
+import { paintOverlay, textFontFamily, textLayout, moveText, moveTextTail, strokeLayout, moveStroke, scaleStrokes, watermarkLayout, moveWatermark } from './pdf.js';
 import { createThemeController } from './theme.js';
 import { storePrintJob, deletePrintJob, purgeLegacyPrintJobs } from './print-job.js';
 import { createFullscreenPreview } from './fullscreen-preview.js';
@@ -126,9 +126,11 @@ function updateControls() {
   $('open-select').setAttribute('aria-expanded', String(visibleMenu === 'select' && !!model.active));
   $('panel-select').hidden = !model.active || visibleMenu !== 'select';
   const textCount = selectedTexts().length;
+  positionTextTailHandle();
   $('update-text').disabled = busy || textCount !== 1 || !viewport;
   $('delete-text').disabled = busy || !selectedText();
   $('panel-text').hidden = !model.active || visibleMenu !== 'text';
+  $('text-box-shape-field').hidden = !textEnabled || textSelected;
   $('delete-stroke').disabled = busy || !selectedStroke();
   const strokeCount = selectedStrokes().length;
   $('pen-menu-title').textContent = strokeCount > 1 ? `選択した描画（${strokeCount}件）` : selectedStroke() ? '選択した描画' : 'ペンの設定';
@@ -144,7 +146,7 @@ function updateControls() {
   $('text-mode-hint').textContent = textEdit ? '文字書式は選択範囲に、背景はボックス全体に適用します。'
     : textCount > 1 ? `選択した${textCount}件に一括適用。サイズは差を保ち、8〜96ptの最初の境界で全体が止まります。`
       : selectedText() ? '文字・背景をすぐ反映。Shift＋クリックで追加選択・解除できます。'
-      : '紙面クリックで入力。文字・背景は新しいボックスに適用します。';
+      : 'ボックスの形を選び、紙面をクリックして入力します。';
   $('close-text').textContent = textEdit ? '確定して終了' : selectedText() ? '選択を解除' : '配置を終了';
   $('text-selection-actions').hidden = !selectedText() || !!textEdit;
   $('text-edit-actions').hidden = !textEdit;
@@ -485,6 +487,7 @@ $('preview-area').addEventListener('wheel', event => {
 async function renderPreview(anchor = null) {
   const version = ++renderVersion;
   renderTask?.cancel(); viewport = null; stroke = null; annotationDrag = null;
+  $('text-tail-handle').hidden = true;
   $('text-handles').querySelectorAll('.text-handle').forEach(button => button.remove());
   const record = model.active;
   if (!record) return;
@@ -802,7 +805,7 @@ function selectAnnotation(annotation, { toggle = false, preserve = false } = {})
     }
     syncTextFormatControls();
   } else { textEnabled = false; }
-  $('text-handles').querySelectorAll('button').forEach(button => {
+  $('text-handles').querySelectorAll('.text-handle').forEach(button => {
     const selected = button.dataset.annotationId === selectedAnnotationId
       || (isStroke && selectedStrokeIds.has(button.dataset.annotationId)) || (isText && selectedTextIds.has(button.dataset.annotationId));
     button.classList.toggle('selected', selected); button.setAttribute('aria-pressed', String(selected));
@@ -825,6 +828,7 @@ function syncPenControls(annotation = selectedStroke()) {
 }
 function annotationPreview(annotation) {
   return annotationDrag?.currents?.find(item => item.id === annotation.id)
+    || (annotation.id === annotationDrag?.current?.id ? annotationDrag.current : null)
     || strokeFormatSession?.previews.get(annotation.id)
     || textFormatSession?.previews.get(annotation.id)
     || (annotation.id === annotationFormatPreview?.id ? annotationFormatPreview : annotation);
@@ -836,6 +840,7 @@ function textSettings() {
     backgroundOpacity: Number($('text-background-opacity').value) / 100 });
   // Undefined defaults preserve annotations made before formatting was added.
   return { fontSize, color: $('text-color').value,
+    boxShape: $('text-box-shape').value === 'bubble' ? 'bubble' : undefined,
     backgroundColor: background.color === 'none' ? undefined : background.color,
     backgroundOpacity: background.opacity === 1 ? undefined : background.opacity,
     fontFamily: $('text-font').value === 'sans-serif' ? undefined : $('text-font').value,
@@ -852,8 +857,10 @@ function fitText(annotation) {
   return moveText(ctx, annotation, viewport, 0, 0);
 }
 function resetTextBackgroundSettings() {
-  $('text-background').value = '#000000';
-  $('text-background-opacity').value = '0'; $('text-background-opacity-value').value = '0%';
+  const bubble = $('text-box-shape').value === 'bubble';
+  $('text-background').value = bubble ? '#ffffff' : '#000000';
+  const opacity = bubble ? '100' : '0';
+  $('text-background-opacity').value = opacity; $('text-background-opacity-value').value = `${opacity}%`;
 }
 function enableTextInsertion() {
   if (busy || stroke || annotationDrag || pageDrag || !model.active) return;
@@ -889,10 +896,11 @@ $('update-text').addEventListener('click', () => {
 
 function paintTextPreview() {
   if (!viewport || !model.active) return;
-  const stampDraft = textEdit?.draft.stampPattern && textEdit.draft.stampPattern !== 'plain' ? textEdit.draft : null;
+  const draft = textEdit?.draft;
+  const framedDraft = draft?.boxShape === 'bubble' || (draft?.stampPattern && draft.stampPattern !== 'plain') ? draft : null;
   paintOverlay($('ink-canvas').getContext('2d'), { ...model.active,
     strokes: [...model.active.strokes.filter(item => item.id !== textEdit?.original?.id)
-      .map(annotationPreview), ...(stampDraft ? [stampDraft] : [])] }, viewport, { hideTextFor: stampDraft?.id });
+      .map(annotationPreview), ...(framedDraft ? [framedDraft] : [])] }, viewport, { hideTextFor: framedDraft?.id });
 }
 
 function positionTextEditor() {
@@ -905,23 +913,21 @@ function positionTextEditor() {
     : `rgb(${background.color === '#ffffff' ? '255 255 255' : '0 0 0'} / ${background.opacity})`;
   // Match the PDF font and explicit line breaks; never introduce browser wrapping.
   Object.assign(editor.style, { left: `${layout.x * scale}px`, top: `${layout.y * scale}px`,
-    width: `${Math.max(layout.contentWidth * scale + 2, draft.text ? 0 : 60)}px`,
+    width: `${Math.max(layout.contentWidth * scale + 2, draft.text || layout.bubble ? 0 : 60)}px`,
     paddingLeft: `${layout.insetLeft * scale}px`, paddingRight: `${layout.insetRight * scale}px`,
-    paddingTop: `${(layout.stampInsetTop || 0) * scale}px`, paddingBottom: `${(layout.stampInsetBottom || 0) * scale}px`,
+    paddingTop: `${(layout.bubble?.padding ?? layout.stampInsetTop) * scale}px`,
+    paddingBottom: `${(layout.bubble?.padding ?? layout.stampInsetBottom) * scale}px`,
     height: `${(layout.textHeight ?? layout.height) * scale + 2}px`, fontSize: `${layout.size * scale}px`,
     lineHeight: '1.3', color: draft.color, caretColor: draft.color,
     fontFamily: textFontFamily(draft.fontFamily), fontWeight: draft.bold ? '700' : '400',
     fontStyle: draft.italic ? 'italic' : 'normal', textDecoration: draft.underline ? 'underline' : 'none',
     textAlign: draft.textAlign || 'left',
-    backgroundImage: `linear-gradient(${backgroundFill}, ${backgroundFill})`,
+    backgroundImage: layout.stamp || layout.bubble ? 'none' : `linear-gradient(${backgroundFill}, ${backgroundFill})`,
     backgroundSize: `${layout.width * scale}px ${layout.height * scale}px`, backgroundRepeat: 'no-repeat',
     transform: `rotate(${layout.angle}rad)` });
   editor.dataset.stampInk = layout.stamp?.filled ? layout.stamp.textColor === '#ffffff' ? 'light' : 'dark' : '';
-  if (layout.stamp) {
-    editor.style.backgroundImage = 'none';
-    editor.style.caretColor = layout.stamp.textColor;
-    paintTextPreview();
-  }
+  if (layout.stamp) editor.style.caretColor = layout.stamp.textColor;
+  if (layout.stamp || layout.bubble) paintTextPreview();
 }
 
 function updateTextDraft() {
@@ -954,7 +960,8 @@ function startTextEdit(annotation, isNew = false) {
   const editor = createTextEditor(annotation);
   editor.className = 'text-editor'; editor.value = annotation.text;
   editor.spellcheck = false;
-  editor.setAttribute('aria-label', 'テキストボックス');
+  if (annotation.boxShape === 'bubble') editor.dataset.placeholder = '入力';
+  editor.setAttribute('aria-label', annotation.boxShape === 'bubble' ? '吹き出しテキストボックス' : 'テキストボックス');
   editor.setAttribute('aria-describedby', 'text-edit-hint');
   editor.setAttribute('aria-keyshortcuts', 'F2 Control+b Control+i Control+u Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight Escape');
   textEdit = { pageId: model.activeId, original: isNew ? null : annotation, draft: annotation, editor };
@@ -998,7 +1005,9 @@ function finishTextEdit(cancel = false) {
         ? p.strokes.flatMap(item => item.id === original.id ? (empty ? [] : [draft]) : [item])
         : [...p.strokes, draft] }));
       refreshThumbnails();
-      status(empty ? 'テキストを削除しました。' : 'テキストを確定しました。クリックで再編集、テキストアイコンで書式を変更できます。', 'success');
+      const message = draft.boxShape === 'bubble' ? '吹き出しを確定しました。本体をクリックして再編集、しっぽをドラッグして先端を移動できます。'
+        : 'テキストを確定しました。クリックで再編集、テキストアイコンで書式を変更できます。';
+      status(empty ? 'テキストを削除しました。' : message, 'success');
     }
     selectedAnnotationId = empty ? null : draft.id;
   } else selectedAnnotationId = original?.id ?? null;
@@ -1207,6 +1216,7 @@ for (const id of ['pen-color', 'pen-width', 'pen-transparency']) {
   });
   $(id).addEventListener('blur', finishAnnotationFormatting);
 }
+$('text-box-shape').addEventListener('change', () => resetTextBackgroundSettings());
 for (const id of ['text-color', 'text-size', 'text-font', 'text-align', 'text-background', 'text-background-opacity']) {
   const property = { 'text-color': 'color', 'text-size': 'fontSize', 'text-font': 'fontFamily', 'text-align': 'textAlign',
     'text-background': 'backgroundColor', 'text-background-opacity': 'backgroundOpacity' }[id];
@@ -1401,6 +1411,29 @@ function positionAnnotationHandle(button, annotation) {
   const padding = annotation.tool === 'text' ? 0 : Math.max(0, (8 - Math.min(layout.width, layout.height) * scale) / 2);
   Object.assign(button.style, { left: `${layout.x * scale - padding}px`, top: `${layout.y * scale - padding}px`,
     width: `${layout.width * scale + padding * 2}px`, height: `${layout.height * scale + padding * 2}px`, transform: `rotate(${layout.angle}rad)` });
+  if (layout.bubble) {
+    let tail = button.querySelector('.text-tail-hit-area polygon');
+    if (!tail) {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.classList.add('text-tail-hit-area'); svg.setAttribute('aria-hidden', 'true');
+      tail = document.createElementNS(svg.namespaceURI, 'polygon');
+      svg.append(tail); button.append(svg);
+    }
+    tail.setAttribute('points', layout.bubble.tail.map(([x, y]) => `${x * scale},${y * scale}`).join(' '));
+  }
+}
+function positionTextTailHandle() {
+  const handle = $('text-tail-handle');
+  const annotation = !busy && viewport && !textEdit && selectedTexts().length === 1 ? selectedText() : null;
+  handle.hidden = annotation?.boxShape !== 'bubble';
+  if (handle.hidden) return;
+  const current = annotationDrag?.current?.id === annotation.id ? annotationDrag.current : annotationPreview(annotation);
+  const canvas = $('ink-canvas');
+  const { bubble } = textLayout(canvas.getContext('2d'), current, viewport);
+  const scale = canvas.getBoundingClientRect().width / viewport.width;
+  const [x, y] = bubble.tip;
+  handle.style.left = `${x * scale}px`;
+  handle.style.top = `${y * scale}px`;
 }
 function refreshAnnotationHandles() {
   if (!model.active || !viewport) return;
@@ -1417,9 +1450,11 @@ function refreshAnnotationHandles() {
     button.type = 'button'; button.className = `text-handle${isText ? '' : ' stroke-handle'}${selected ? ' selected' : ''}`;
     button.dataset.annotationId = annotation.id;
     if (isText) button.dataset.textId = annotation.id;
-    button.setAttribute('aria-label', isText ? `テキストを移動: ${annotation.text}` : annotation.tool === 'watermark' ? `透かしを選択・移動: ${annotation.text}` : '描画を選択・移動');
+    const textAction = annotation.boxShape === 'bubble' ? '吹き出しを選択・移動' : 'テキストを移動';
+    button.setAttribute('aria-label', isText ? `${textAction}: ${annotation.text}` : annotation.tool === 'watermark' ? `透かしを選択・移動: ${annotation.text}` : '描画を選択・移動');
     button.setAttribute('aria-pressed', String(!!selected));
     button.title = 'クリックまたはF2で内容を編集。Ctrl+B/I/Uで太字・斜体・下線、Ctrl+↑/↓でサイズ変更、Ctrl+←/→で背景の不透明度を変更。ドラッグ・方向キーで移動、Deleteで削除。';
+    if (annotation.boxShape === 'bubble') button.title = 'クリックで吹き出しを選択。選択後に本体をクリックするかF2で内容を編集。しっぽはドラッグで移動できます。';
     if (isText) button.title += ' Shift＋クリックで追加選択・解除。複数選択中はダブルクリックで個別編集。';
     if (!isText) button.title = 'クリックで選択。ドラッグで移動。方向キーで1pt、Shift＋方向キーで10pt移動。Deleteで削除。';
     const isStroke = !isText && annotation.tool !== 'watermark';
@@ -1431,14 +1466,17 @@ function refreshAnnotationHandles() {
     const currentText = () => pageAnnotations().find(item => item.id === button.dataset.annotationId);
     button.addEventListener('dragstart', event => event.preventDefault());
     button.addEventListener('click', event => {
-      if (event.detail === 0 && !busy && currentText()) {
+      const annotation = currentText();
+      if (event.detail === 0 && !busy && annotation) {
         const toggle = (isStroke || isText) && (event.shiftKey || event.ctrlKey || event.metaKey);
-        if (isText && !toggle && selectedTexts().length <= 1) startTextEdit(currentText());
-        else selectAnnotation(currentText(), { toggle, preserve: isText && selectedTextIds.has(currentText().id) });
+        if (isText && !toggle && selectedTexts().length <= 1
+          && (annotation.boxShape !== 'bubble' || selectedAnnotationId === annotation.id)) startTextEdit(annotation);
+        else selectAnnotation(annotation, { toggle, preserve: isText && selectedTextIds.has(annotation.id) });
       }
     });
     button.addEventListener('dblclick', event => {
-      if (isText && !busy && !event.shiftKey && !event.ctrlKey && !event.metaKey && currentText()) startTextEdit(currentText());
+      if (isText && !busy && !event.shiftKey && !event.ctrlKey && !event.metaKey
+        && !event.target?.closest('.text-tail-hit-area') && currentText()) startTextEdit(currentText());
     });
     button.addEventListener('pointerdown', event => {
       if (busy || stroke || annotationDrag || !viewport || event.button !== 0 || !event.isPrimary) return;
@@ -1447,14 +1485,17 @@ function refreshAnnotationHandles() {
       event.preventDefault();
       if (isText) previewMenuOpen = false;
       const toggle = (isStroke || isText) && (event.shiftKey || event.ctrlKey || event.metaKey);
-      selectAnnotation(annotation, { toggle, preserve: isText ? selectedTexts().some(item => item.id === annotation.id)
+      const fromTail = !!event.target?.closest('.text-tail-hit-area');
+      const selectOnly = annotation.boxShape === 'bubble' && selectedAnnotationId !== annotation.id;
+      selectAnnotation(annotation, { toggle, preserve: isText ? !fromTail && selectedTexts().some(item => item.id === annotation.id)
         : isStroke && selectedStrokes().some(item => item.id === annotation.id) });
       button.focus({ preventScroll: true });
       if (toggle) return;
+      if (fromTail) { startTextTailDrag(event, annotation, event.target); return; }
       button.setPointerCapture(event.pointerId);
       annotationDrag = { pageId: model.activeId, pointerId: event.pointerId, original: annotation, current: annotation,
         originals: (isText ? selectedTexts() : selectedStrokes()).length > 1 ? (isText ? selectedTexts() : selectedStrokes()) : null,
-        start: canvasPoint(event), button };
+        start: canvasPoint(event), button, selectOnly };
     });
     button.addEventListener('pointermove', updateAnnotationDrag);
     button.addEventListener('pointerup', finishAnnotationDrag);
@@ -1463,6 +1504,7 @@ function refreshAnnotationHandles() {
     $('text-handles').append(button);
   }
   for (const button of handles.values()) button.remove();
+  positionTextTailHandle();
   if (textEdit) {
     if (!textEdit.editor.isConnected) $('text-handles').append(textEdit.editor);
     positionTextEditor();
@@ -1478,6 +1520,14 @@ function updateAnnotationDrag(event) {
   const scale = $('ink-canvas').getBoundingClientRect().width / viewport.width;
   if (!annotationDrag.moved && Math.hypot(point[0] - annotationDrag.start[0], point[1] - annotationDrag.start[1]) * scale < 4) return;
   annotationDrag.moved = true;
+  if (annotationDrag.tailTip) {
+    const dx = point[0] - annotationDrag.start[0], dy = point[1] - annotationDrag.start[1];
+    const [x, y] = annotationDrag.tailTip;
+    const ctx = $('ink-canvas').getContext('2d');
+    annotationDrag.current = Math.hypot(dx, dy) < 0.01 * viewport.scale ? annotationDrag.original
+      : moveTextTail(ctx, annotationDrag.current, viewport, x + dx, y + dy);
+    paintTextPreview(); positionTextTailHandle(); return;
+  }
   if (annotationDrag.originals) {
     annotationDrag.currents = moveStrokesTogether(annotationDrag.originals, point[0] - annotationDrag.start[0], point[1] - annotationDrag.start[1]);
     annotationDrag.current = annotationDrag.currents.find(item => item.id === annotationDrag.original.id);
@@ -1486,13 +1536,15 @@ function updateAnnotationDrag(event) {
   }
   annotationDrag.current = moveAnnotation(annotationDrag.original, point[0] - annotationDrag.start[0], point[1] - annotationDrag.start[1]);
   positionAnnotationHandle(annotationDrag.button, annotationDrag.current);
+  positionTextTailHandle();
   paintOverlay($('ink-canvas').getContext('2d'), replaceAnnotation(model.active, annotationDrag.original, annotationDrag.current), viewport);
 }
 function finishAnnotationDrag(event) {
   if (!annotationDrag || event.pointerId !== annotationDrag.pointerId) return;
   updateAnnotationDrag(event);
-  const { pageId, original, current, currents, button, pointerId, moved } = annotationDrag; annotationDrag = null;
+  const { pageId, original, current, currents, button, pointerId, moved, tailTip, selectOnly } = annotationDrag; annotationDrag = null;
   if (button.hasPointerCapture(pointerId)) button.releasePointerCapture(pointerId);
+  if (tailTip) { commitTextTail(pageId, original, current); return; }
   const [x, y] = original.points[0]; const [nextX, nextY] = current.points[0];
   if (Math.hypot(nextX - x, nextY - y) > 0.01) {
     model.update(new Set([pageId]), p => currents ? replaceStrokes(p, currents) : replaceAnnotation(p, original, current));
@@ -1502,15 +1554,37 @@ function finishAnnotationDrag(event) {
   // Preserve the DOM target for the browser's second click/dblclick event.
   positionAnnotationHandle(button, current); updateControls();
   // Clicking edits the content; formatting opens only from the text toolbar icon.
-  if (!moved && original.tool === 'text' && selectedTexts().length === 1) startTextEdit(current);
+  if (!moved && !selectOnly && original.tool === 'text' && selectedTexts().length === 1) startTextEdit(current);
 }
-function cancelAnnotationDrag() {
-  if (!annotationDrag) return;
+function cancelAnnotationDrag(event) {
+  if (!annotationDrag || (event && event.pointerId !== annotationDrag.pointerId)) return;
   const { button, pointerId } = annotationDrag; annotationDrag = null;
   if (button.hasPointerCapture(pointerId)) button.releasePointerCapture(pointerId);
   if (viewport && model.active) paintOverlay($('ink-canvas').getContext('2d'), model.active, viewport);
   refreshAnnotationHandles(); updateControls();
 }
+function commitTextTail(pageId, original, current) {
+  if (original === current) return;
+  model.update(new Set([pageId]), page => replaceAnnotation(page, original, current));
+  paintTextPreview(); refreshAnnotationHandles(); refreshThumbnails(); updateControls();
+  status('吹き出しのしっぽを移動しました。', 'success');
+}
+function startTextTailDrag(event, original, button) {
+  const { bubble } = textLayout($('ink-canvas').getContext('2d'), original, viewport);
+  button.setPointerCapture(event.pointerId);
+  annotationDrag = { pageId: model.activeId, pointerId: event.pointerId, original, current: original,
+    tailTip: bubble.tip, start: canvasPoint(event), button };
+}
+const textTailHandle = $('text-tail-handle');
+textTailHandle.addEventListener('pointerdown', event => {
+  if (textTailHandle.hidden || busy || stroke || annotationDrag || pageDrag || !viewport || event.button !== 0 || !event.isPrimary) return;
+  event.preventDefault(); textTailHandle.focus({ preventScroll: true });
+  startTextTailDrag(event, selectedText(), textTailHandle);
+});
+textTailHandle.addEventListener('pointermove', updateAnnotationDrag);
+textTailHandle.addEventListener('pointerup', finishAnnotationDrag);
+textTailHandle.addEventListener('pointercancel', cancelAnnotationDrag);
+textTailHandle.addEventListener('lostpointercapture', cancelAnnotationDrag);
 function pdfPoint(event) {
   const rect = $('ink-canvas').getBoundingClientRect();
   const x = Math.max(0, Math.min(viewport.width, (event.clientX - rect.left) / rect.width * viewport.width));
@@ -1564,8 +1638,9 @@ $('ink-canvas').addEventListener('pointerdown', event => {
   if (textEnabled && !busy && viewport && model.active && event.button === 0 && event.isPrimary && !annotationDrag) {
     event.preventDefault();
     try {
-      startTextEdit({ id: uid(), tool: 'text', text: '', ...textSettings(), rotation: model.active.rotation,
-        points: [pdfPoint(event)] }, true);
+      const annotation = { id: uid(), tool: 'text', text: '', ...textSettings(), rotation: model.active.rotation,
+        points: [pdfPoint(event)] };
+      startTextEdit(annotation.boxShape === 'bubble' ? fitText(annotation) : annotation, true);
     } catch (error) { fail(error); }
     return;
   }
@@ -1644,6 +1719,13 @@ document.addEventListener('keydown', event => {
   if (direction && !event.ctrlKey && !event.metaKey && !event.altKey && selectedAnnotation() && !textEdit && !stroke && !annotationDrag && !pageDrag) {
     event.preventDefault();
     const step = event.shiftKey ? 10 : 1;
+    if (event.target === $('text-tail-handle') && !$('text-tail-handle').hidden && viewport) {
+      const original = selectedText(), ctx = $('ink-canvas').getContext('2d');
+      const [x, y] = textLayout(ctx, original, viewport).bubble.tip;
+      const distance = step * viewport.scale;
+      commitTextTail(model.activeId, original, moveTextTail(ctx, original, viewport, x + direction[0] * distance, y + direction[1] * distance));
+      return;
+    }
     moveSelectedAnnotation(direction[0] * step, direction[1] * step); return;
   }
   if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && model.active && !stroke && !annotationDrag && !pageDrag) {

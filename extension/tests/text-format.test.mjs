@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { createCanvas } from '@napi-rs/canvas';
 import { EditorModel } from '../src/model.js';
-import { textFont, textFontFamily, textLayout, moveText, moveStroke, strokeLayout, paintOverlay } from '../src/pdf.js';
+import { textFont, textFontFamily, textLayout, moveText, moveTextTail, moveStroke, strokeLayout, paintOverlay } from '../src/pdf.js';
 import { styledRuns, textStyle, textBackground, formatTextBackground, formatText, replaceText } from '../src/text-format.js';
 
 const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
@@ -29,7 +29,7 @@ test('a text click edits without a menu, while a drag only moves the text', () =
     Object.assign(context, { annotationDrag: { pageId: 'page', original, current: original,
       pointerId: 1, moved, button: { hasPointerCapture: () => false } },
       previewMenuOpen: false, updateAnnotationDrag() {}, positionAnnotationHandle() {} });
-    vm.runInContext(slice('function finishAnnotationDrag(', '\nfunction cancelAnnotationDrag()'), context);
+    vm.runInContext(slice('function finishAnnotationDrag(', '\nfunction cancelAnnotationDrag('), context);
     context.finishAnnotationDrag({ pointerId: 1 });
     assert.equal(context.previewMenuOpen, false);
     assert.equal(!!context.textEdit, !moved);
@@ -216,13 +216,20 @@ function multipleSetup(firstSize = 24, secondSize = 36) {
 
 function installHandles({ context, $ }) {
   const handles = [];
-  context.document.createElement = () => ({ style: {}, dataset: {}, handlers: {}, attributes: {},
-    classList: { toggle(name, value) { this[name] = value; } },
+  const element = () => ({ style: {}, dataset: {}, handlers: {}, attributes: {}, children: [],
+    classList: { toggle(name, value) { this[name] = value; }, add(name) { this[name] = true; } },
     setAttribute(key, value) { this.attributes[key] = value; },
     addEventListener(type, handler) { this.handlers[type] = handler; },
+    append(child) { this.children.push(child); },
+    querySelector() { return this.children[0]?.children[0]; },
+    closest() { return null; },
     remove() { handles.splice(handles.indexOf(this), 1); }, focus() {},
     setPointerCapture() { this.captured = true; }, hasPointerCapture() { return !!this.captured; },
     releasePointerCapture() { this.captured = false; },
+  });
+  context.document.createElement = element;
+  context.document.createElementNS = (namespaceURI, tagName) => ({
+    ...element(), namespaceURI, closest: selector => selector === '.text-tail-hit-area' && tagName === 'polygon',
   });
   $('text-handles').querySelectorAll = () => handles;
   $('text-handles').append = handle => handles.push(handle);
@@ -560,6 +567,118 @@ test('new text insertion starts with black at zero opacity, retains settings whi
   context.activate('second-page');
   assert.equal(context.textEnabled, true);
   assert.equal($('text-background').value, '#000000'); assert.equal(Number($('text-background-opacity').value), 0);
+});
+
+test('a speech bubble can be placed at the page edge, edited, moved and restored through history', () => {
+  const { context, $, model, original, errors } = setup();
+  model.update(new Set(['page']), page => ({ ...page, rotation: 0 }));
+  context.enableSelection(); context.enableTextInsertion();
+  let id = 0;
+  Object.assign(context, { uid: () => `box-${++id}`, pdfPoint: event => [event.clientX, event.clientY],
+    fail(error) { throw error; } });
+  vm.runInContext(slice("$('ink-canvas').addEventListener('pointerdown', event => {", '\nfunction updateStroke('), context);
+  $('text-box-shape').value = 'bubble';
+  $('text-box-shape').handlers.change();
+  $('ink-canvas').handlers.pointerdown(pointer(590, 790));
+  context.positionTextEditor();
+  const { editor, draft } = context.textEdit;
+  assert.equal(draft.boxShape, 'bubble');
+  assert.equal(draft.backgroundColor, '#ffffff');
+  assert.equal(textBackground(draft).opacity, 1);
+  assert.equal(editor.style.backgroundImage, 'none');
+  assert.ok(parseFloat(editor.style.paddingTop) > 0);
+  editor.value = 'Speech bubble\nSecond line';
+  assert.ok(context.finishTextEdit());
+  const bubble = model.active.strokes.at(-1);
+  const layout = textLayout($('ink-canvas').getContext('2d'), bubble, context.viewport);
+  assert.ok(layout.right <= 600 + 1e-8 && layout.bottom <= 800 + 1e-8);
+  context.moveSelectedAnnotation(-10, -10);
+  const moved = model.active.strokes.at(-1);
+  assert.ok(moved.points[0][0] < bubble.points[0][0] && moved.points[0][1] < bubble.points[0][1]);
+  context.startTextEdit(moved);
+  context.textEdit.editor.value = 'Edited';
+  $('text-background').value = '#ffffff'; $('text-background').handlers.change();
+  assert.ok(context.finishTextEdit());
+  assert.equal(model.active.strokes.at(-1).boxShape, 'bubble');
+  assert.equal(model.active.strokes.at(-1).backgroundColor, '#ffffff');
+  model.undo(); assert.deepEqual(model.active.strokes.at(-1), moved);
+  model.redo(); assert.equal(model.active.strokes.at(-1).text, 'Edited');
+  context.enableSelection(); context.enableTextInsertion();
+  $('text-box-shape').value = 'plain';
+  $('text-box-shape').handlers.change();
+  $('ink-canvas').handlers.pointerdown(pointer(70, 100));
+  assert.equal(context.textEdit.draft.boxShape, undefined);
+  assert.equal(textBackground(context.textEdit.draft).opacity, 0);
+  assert.equal(model.active.strokes[0], original);
+  assert.deepEqual(errors, []);
+});
+
+test('dragging a tail commits one move and cancel keeps the existing placement', () => {
+  const { context, $, model, original } = setup();
+  const bubble = { ...original, boxShape: 'bubble' };
+  model.update(new Set(['page']), page => ({ ...page, strokes: [bubble] }));
+  const handle = $('text-tail-handle');
+  Object.assign(handle, { setPointerCapture() {}, hasPointerCapture: () => false });
+  Object.assign(context, { moveTextTail });
+  $('ink-canvas').getBoundingClientRect = () => ({ left: 0, top: 0, width: 600, height: 800 });
+  vm.runInContext(slice('function canvasPoint(', '\nfunction pdfPoint('), context);
+  const pointerAt = (x, y) => ({ ...pointer(x, y), pointerId: 1 });
+  const tip = () => textLayout($('ink-canvas').getContext('2d'), model.active.strokes[0], context.viewport).bubble.tip;
+  const start = tip(), history = model.past.length;
+  handle.handlers.pointerdown(pointerAt(...start));
+  handle.handlers.pointermove(pointerAt(250, 70));
+  assert.equal(model.active.strokes[0], bubble);
+  assert.equal(parseFloat(handle.style.top), 70);
+  handle.handlers.pointermove(pointerAt(80, 120));
+  assert.equal(parseFloat(handle.style.top), 70);
+  handle.handlers.pointerup(pointerAt(250, 70));
+  assert.deepEqual(tip(), [250, 70]);
+  assert.equal(model.past.length, history + 1);
+  assert.equal(model.active.strokes[0].points, bubble.points);
+  model.undo(); assert.deepEqual(tip(), start);
+  model.redo(); assert.deepEqual(tip(), [250, 70]);
+  handle.handlers.pointerdown(pointerAt(250, 70));
+  handle.handlers.pointermove(pointerAt(270, -100));
+  assert.ok(Math.abs(parseFloat(handle.style.top) - bubble.fontSize * 0.065 / 2) < 1e-8);
+  handle.handlers.pointercancel({ pointerId: 1 });
+  assert.deepEqual(tip(), [250, 70]);
+  assert.equal(model.past.length, history + 1);
+});
+
+test('first click on a bubble body or tail selects it without opening the editor', () => {
+  const env = setup(), { context, $, model, original } = env;
+  const bubble = { ...original, boxShape: 'bubble' };
+  model.update(new Set(['page']), page => ({ ...page, strokes: [bubble] }));
+  context.enableSelection();
+  context.moveTextTail = moveTextTail;
+  const updateControls = context.updateControls;
+  context.updateControls = () => { updateControls(); context.positionTextTailHandle(); };
+  const [body] = installHandles(env);
+  const tail = body.querySelector('.text-tail-hit-area polygon');
+  assert.equal(tail.attributes.points.split(' ').length, 3);
+  const history = model.past.length;
+  const bodyClick = pointer(80, 115, { target: body });
+  const ctx = $('ink-canvas').getContext('2d');
+  const tailClick = pointer(...textLayout(ctx, bubble, context.viewport).bubble.tip, { target: tail });
+  for (const event of [bodyClick, tailClick]) {
+    body.handlers.pointerdown(event);
+    body.handlers.pointerup(event);
+    assert.equal(body.attributes['aria-pressed'], 'true');
+    assert.equal($('text-tail-handle').hidden, false);
+    assert.equal(context.textEdit, null);
+    assert.equal(model.past.length, history);
+    context.enableSelection();
+  }
+  body.handlers.pointerdown(tailClick);
+  const dragEnd = pointer(250, 70, { target: tail });
+  body.handlers.pointermove(dragEnd);
+  body.handlers.pointerup(dragEnd);
+  const moved = model.active.strokes[0];
+  assert.deepEqual(textLayout(ctx, moved, context.viewport).bubble.tip, [250, 70]);
+  assert.equal(moved.points, bubble.points);
+  body.handlers.pointerdown(bodyClick);
+  body.handlers.pointerup(bodyClick);
+  assert.equal(context.textEdit.editor.value, bubble.text);
 });
 
 test('opacity inputs preserve fully transparent backgrounds and removing a background preserves legacy data', () => {
