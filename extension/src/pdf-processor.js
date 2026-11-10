@@ -2,7 +2,7 @@ import { PDF_LIMITS, PdfLimitError } from './limits.js';
 
 // Each operation owns its Worker. A timeout cannot destroy previously imported
 // documents or editor state, and termination releases its parser allocations.
-export function runPdfJob(job, { progress = () => {}, signal, timeout = job.type === 'load' ? PDF_LIMITS.loadTimeout : PDF_LIMITS.exportTimeout,
+export function runPdfJob(job, { progress = () => {}, signal, timeout = ['load', 'image'].includes(job.type) ? PDF_LIMITS.loadTimeout : PDF_LIMITS.exportTimeout,
   createWorker = () => new Worker(new URL('./pdf-worker.js', import.meta.url), { type: 'module' }) } = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(new Error('PDF処理を取り消しました。')); return; }

@@ -554,7 +554,7 @@ async function addFiles(files) {
     }
   }
   if (added.length) {
-    if (!model.pages.length) $('output-name').value = safeFilename(files[0].name);
+    if (!model.pages.length) $('output-name').value = safeFilename(sources.get(added[0].sourceId).outputName);
     model.commit([...model.pages, ...added], { activeId: added[0].id });
     refresh();
   }

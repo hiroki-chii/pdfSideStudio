@@ -7,11 +7,20 @@ import { PDF_LIMITS, PdfLimitError } from './limits.js';
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 export async function readPdfSource(file, { usedBytes, pageCount }) {
-  if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') throw new Error('PDFファイルを選択してください。');
+  const pdf = /\.pdf$/i.test(file.name) || file.type === 'application/pdf';
+  const imageExtension = /\.(?:jpe?g|png|webp)$/i;
+  if (!pdf && !imageExtension.test(file.name) && !/^image\/(?:jpeg|png|webp)$/i.test(file.type)) {
+    throw new Error('PDF・JPEG・PNG・WebPファイルを選択してください。');
+  }
   if (file.size > MAX_FILE_BYTES) throw new Error('1ファイル50MiBまでです。');
-  if (usedBytes + file.size > MAX_TOTAL_BYTES) throw new Error('読み込み総量150MiBを超えます。保存後にパネルを開き直してください。');
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const pages = await runPdfJob({ type: 'load', bytes });
+  const totalLimitMessage = '読み込み総量150MiBを超えます。保存後にパネルを開き直してください。';
+  if (usedBytes + file.size > MAX_TOTAL_BYTES) throw new Error(totalLimitMessage);
+  if (pageCount >= MAX_PAGES) throw new Error(`${MAX_PAGES}ページを超えます。`);
+  const input = new Uint8Array(await file.arrayBuffer());
+  const bytes = pdf ? input : await runPdfJob({ type: 'image', bytes: input });
+  const size = Math.max(file.size, bytes.length);
+  if (usedBytes + size > MAX_TOTAL_BYTES) throw new Error(totalLimitMessage);
+  const pages = pdf ? await runPdfJob({ type: 'load', bytes }) : [{ rotation: 0 }];
   if (pageCount + pages.length > MAX_PAGES) throw new Error(`${MAX_PAGES}ページを超えます。`);
   const loading = pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false,
     cMapUrl: new URL('cmaps/', document.baseURI).href, cMapPacked: true,
@@ -26,7 +35,8 @@ export async function readPdfSource(file, { usedBytes, pageCount }) {
       timer = setTimeout(() => reject(new PdfLimitError('プレビュー読み込み時間')), PDF_LIMITS.loadTimeout);
     })]);
     if (preview.numPages !== pages.length) throw new Error('PDFのページ構造を確認できません。');
-    return { bytes, preview, pages, name: file.name, size: file.size };
+    return { bytes, preview, pages, name: file.name, size,
+      outputName: pdf ? file.name : file.name.replace(imageExtension, '') };
   } catch (error) { loading.destroy().catch(() => {}); throw error; }
   finally { clearTimeout(timer); }
 }

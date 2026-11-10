@@ -1,12 +1,19 @@
 import { zipSync } from 'fflate';
 import { loadLimitedPdf, createPdfBudget } from './pdf-security.js';
 import { buildPdf } from './pdf-export.js';
-import { MAX_TOTAL_BYTES, MAX_PAGES, safeFilename, normalizeRotation } from './model.js';
+import { MAX_FILE_BYTES, MAX_TOTAL_BYTES, MAX_PAGES, safeFilename, normalizeRotation } from './model.js';
 import { PDF_LIMITS, PdfLimitError } from './limits.js';
+import { imageToPdf } from './image-import.js';
 
 // Pure job dispatcher shared by the browser Worker and integration tests.
 export async function processPdfJob({ type, bytes, sources: inputs, records, title }, progress = () => {}) {
   const budget = createPdfBudget();
+  if (type === 'image') {
+    if (!(bytes instanceof Uint8Array) || bytes.length > MAX_FILE_BYTES) throw new PdfLimitError('ファイルサイズ');
+    const pdfBytes = await imageToPdf(bytes);
+    await loadLimitedPdf(pdfBytes, budget);
+    return pdfBytes;
+  }
   if (type === 'load') {
     const document = await loadLimitedPdf(bytes, budget);
     return document.getPages().map(page => ({ rotation: normalizeRotation(page.getRotation().angle) }));

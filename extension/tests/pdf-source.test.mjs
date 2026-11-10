@@ -12,7 +12,10 @@ function setup({ previewError, pageCount = 1 } = {}) {
     async arrayBuffer() { calls.push('read'); return new ArrayBuffer(100); } };
   const context = vm.createContext({ URL, Uint8Array, setTimeout, clearTimeout, MAX_FILE_BYTES, MAX_TOTAL_BYTES, MAX_PAGES, PDF_LIMITS, PdfLimitError,
     workerUrl: 'local-worker', document: { baseURI: 'https://example.test/' },
-    runPdfJob: async () => { calls.push('inspect'); return Array.from({ length: pageCount }, () => ({ rotation: 0 })); },
+    runPdfJob: async ({ type }) => {
+      if (type === 'image') { calls.push('convert'); return new Uint8Array(200); }
+      calls.push('inspect'); return Array.from({ length: pageCount }, () => ({ rotation: 0 }));
+    },
     pdfjs: { GlobalWorkerOptions: {}, getDocument(options) {
       calls.push(options);
       return { promise: previewError ? Promise.reject(new Error('preview failed')) : Promise.resolve({ numPages: pageCount }),
@@ -50,4 +53,26 @@ test('failed preview loading destroys the failed document without retaining a so
   const { context, calls, file } = setup({ previewError: true });
   await assert.rejects(context.readPdfSource(file, { usedBytes: 0, pageCount: 0 }), /preview failed/);
   assert.equal(calls.at(-1), 'destroy');
+});
+
+test('image import uses converted PDF bytes for preview and counts their size', async () => {
+  const { context, calls, file } = setup();
+  const image = { ...file, name: 'Screenshot.PNG', type: '' };
+  const result = await context.readPdfSource(image, { usedBytes: 0, pageCount: 0 });
+  assert.equal(result.name, image.name);
+  assert.equal(result.outputName, 'Screenshot');
+  assert.equal(result.size, 200);
+  assert.equal(result.pages.length, 1);
+  assert.equal(result.pages[0].rotation, 0);
+  assert.deepEqual(calls.slice(0, 2), ['read', 'convert']);
+  assert.equal(calls[2].data.length, 200);
+});
+
+test('image import enforces page and total byte limits before preview loading', async () => {
+  const { context, calls, file } = setup();
+  const image = { ...file, name: 'photo', type: 'image/jpeg' };
+  await assert.rejects(context.readPdfSource(image, { usedBytes: 0, pageCount: MAX_PAGES }), /ページを超えます/);
+  assert.deepEqual(calls, []);
+  await assert.rejects(context.readPdfSource(image, { usedBytes: MAX_TOTAL_BYTES - file.size, pageCount: 0 }), /読み込み総量/);
+  assert.deepEqual(calls, ['read', 'convert']);
 });

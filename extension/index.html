@@ -14,23 +14,23 @@
       </header>
       <main>
         <div class="theme-row"><button id="theme-mode" class="theme-toggle" type="button" data-mode="system" aria-label="表示モード: デバイスと同じ。クリックでダークに切り替え" title="表示モード: デバイスと同じ（次: ダーク）"><svg data-theme-icon="dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14a8.5 8.5 0 0 1-10.5-10.5A8.5 8.5 0 1 0 20.5 14Z" /></svg><svg data-theme-icon="light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg><svg data-theme-icon="system" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M9 21h6m-3-4v4" /></svg></button></div>
-        <section id="drop-zone" class="upload-card" aria-label="PDFを追加">
-          <input id="file-input" type="file" accept="application/pdf,.pdf" multiple hidden />
-          <button id="add-files" class="upload-button"><span class="upload-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2v20M2 12h20" /></svg></span><span><strong>PDFを追加</strong><small>クリック、またはここにドロップ</small></span><span class="file-tag">PDF</span></button>
+        <section id="drop-zone" class="upload-card" aria-label="PDF・画像を追加">
+          <input id="file-input" type="file" accept="application/pdf,.pdf,image/jpeg,.jpg,.jpeg,image/png,.png,image/webp,.webp" multiple hidden />
+          <button id="add-files" class="upload-button"><span class="upload-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2v20M2 12h20" /></svg></span><span><strong>PDF・画像を追加</strong><small>クリック、またはここにドロップ</small></span><span class="file-tag" aria-hidden="true">PDF / 画像</span></button>
           <p class="privacy"><span aria-hidden="true">◈</span> 端末内で処理 · アップロード不要</p>
         </section>
-        <div id="status" class="status" role="status" aria-live="polite">PDFを追加して編集をはじめましょう。</div>
+        <div id="status" class="status" role="status" aria-live="polite">PDF・JPEG・PNG・WebPに対応しています。</div>
         <section id="empty-state" class="empty-state">
           <div class="paper-art" aria-hidden="true"><div class="back-paper"></div><div class="front-paper"><span class="paper-label">PDF</span><i></i><i></i><i></i><span class="paper-spark">✦</span></div></div>
           <h2>ちょっとした編集を、<br />このパネルひとつで。</h2>
           <p>資料をまとめる。必要なページを取り出す。<br />メモを添えて、そのまま保存。</p>
           <div class="feature-chips"><span>結合・分割</span><span>回転</span><span>ペン</span><span>透かし</span></div>
-          <p class="empty-note">複数のPDFを追加すると、ひとつに結合できます。</p>
+          <p class="empty-note">画像は1枚ずつPDFのページになり、ほかのファイルと結合できます。</p>
         </section>
         <section id="workspace" hidden>
           <section id="page-list-section" class="page-list-section" aria-labelledby="page-list-title">
             <div class="section-heading"><h2 id="page-list-title">ページ <span id="page-count" class="count">0</span></h2></div>
-            <div id="source-legend" class="source-legend" aria-label="追加したPDF"></div>
+            <div id="source-legend" class="source-legend" aria-label="追加したファイル"></div>
             <p id="page-drag-hint" class="page-drag-hint">ドラッグで並べ替え · ページにカーソルを合わせてコピー・削除</p>
             <div id="page-list" class="page-list" aria-label="ページ一覧" aria-describedby="page-drag-hint"></div>
           </section>
@@ -176,7 +176,7 @@
     </dialog>
     <dialog id="help-dialog">
       <div class="dialog-heading"><h2>使い方</h2><button id="close-help" class="icon-button" aria-label="使い方を閉じる">×</button></div>
-      <ol><li>PDFを追加します。複数ファイルは追加順に結合されます。</li><li>プレビュー上のページ一覧をドラッグして順序を変更します。クリックするとプレビューが切り替わり、そのページのコピー・削除を選べます。</li><li>コピー・削除はページ一覧から選んだページに適用します。回転・透かしは表示中のページ／すべてのページを指定できます。</li><li>「PDFを保存」で全ページを出力します。分割は保存画面から実行します。</li></ol>
+      <ol><li>PDFや画像（JPEG・PNG・WebP）を追加します。画像は1枚につき1ページになり、複数ファイルは追加順に結合されます。</li><li>プレビュー上のページ一覧をドラッグして順序を変更します。クリックするとプレビューが切り替わり、そのページのコピー・削除を選べます。</li><li>コピー・削除はページ一覧から選んだページに適用します。回転・透かしは表示中のページ／すべてのページを指定できます。</li><li>「PDFを保存」で全ページを出力します。分割は保存画面から実行します。</li></ol>
       <p>分割では全ページを1ページずつPDFにしてZIPで保存します。</p>
       <p>パスワード保護PDFは非対応です。既存の注釈・リンク・添付ファイル・起動アクションは保存時に引き継ぎません。フォーム入力値等の保持は保証しません。電子署名は無効になります。元ファイルを残し、保存後のPDFを確認してください。</p>
       <p>1ファイル50MiB、合計150MiB・300ページまで。編集履歴は直近30操作を保持します。安全上限を超える複雑なPDFは読み込めない場合があります。</p>
