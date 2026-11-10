@@ -4,6 +4,12 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
 const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
+const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+const menuNames = ['select', 'rotation', 'pen', 'stamp', 'watermark', 'text'];
+const toggleScript = app.slice(app.indexOf('function togglePreviewMenu('),
+  app.indexOf("\n$('open-select').addEventListener"));
+const closeButtonScript = app.slice(app.indexOf("for (const button of document.querySelectorAll('[data-close-preview-menu]'))"),
+  app.indexOf("\n$('start-pen').addEventListener"));
 const dismissalScript = app.slice(app.indexOf("document.addEventListener('pointerdown', event => {"),
   app.indexOf('\nfunction textFormatRange()'));
 const drawingScript = app.slice(app.indexOf("$('ink-canvas').addEventListener('pointerdown', event => {"),
@@ -17,6 +23,7 @@ function setup(tool) {
     if (!nodes.has(id)) nodes.set(id, {
       hidden: id !== `panel-${tool}`, value: 'pen', handlers: {},
       addEventListener(type, handler) { this.handlers[type] = handler; },
+      focus() { calls.push(`focus:${id}`); },
       setPointerCapture() { calls.push('capture'); },
       getContext() { return {}; },
     });
@@ -31,7 +38,7 @@ function setup(tool) {
     update() { calls.push('save-stroke'); } },
   updateControls() {
     if (!context.previewMenuOpen) {
-      for (const name of ['pen', 'text', 'stamp']) $(`panel-${name}`).hidden = true;
+      for (const name of menuNames) $(`panel-${name}`).hidden = true;
     }
   },
   finishAnnotationFormatting() { calls.push('format'); },
@@ -48,7 +55,8 @@ function setup(tool) {
     const event = { button: 0, isPrimary: true, pointerId: 1, clientX: 20, clientY: 30,
       target: { closest(selector) {
         if (selector === '[data-tool-help], #tool-help-dialog' && ['tool-help', 'tool-help-dialog'].includes(target)) return {};
-        if (selector.startsWith('.canvas-stack,') && ['canvas', 'handle', 'editor', 'settings', 'button', 'dialog', 'label'].includes(target)) return {};
+        if (selector.startsWith('.canvas-stack,') && ['canvas', 'handle', 'editor', 'settings', 'button', 'dialog', 'label', 'close-menu'].includes(target)) return {};
+        if (selector.includes('[data-close-preview-menu]') && target === 'close-menu') return {};
         if (selector === '#preview-scroll' && ['canvas', 'handle', 'blank', 'editor'].includes(target)) return {};
         if (selector === '.text-editor' && target === 'editor') return {};
         if (selector === '.text-settings' && target === 'settings') return {};
@@ -63,6 +71,43 @@ function setup(tool) {
   }
   return { context, $, calls, pointerdown };
 }
+
+function setupCloseButton(tool) {
+  const env = setup(tool);
+  const { context, $ } = env;
+  const panel = html.match(new RegExp(`<section id="panel-${tool}"[^>]*>([\\s\\S]*?)</section>`))?.[1];
+  assert.ok(panel?.includes(`data-close-preview-menu="${tool}" aria-label="メニューを閉じる">閉じる</button>`));
+  const button = $(`close-menu-${tool}`);
+  button.dataset = { closePreviewMenu: tool };
+  context.document.querySelectorAll = () => [button];
+  context.selectedText = () => null;
+  context.selectedStroke = () => null;
+  vm.runInContext(toggleScript + '\n' + closeButtonScript, context);
+  return { ...env, button };
+}
+
+test('all six close buttons hide their menu and return focus to its tool', () => {
+  for (const tool of menuNames) {
+    const { context, $, calls, button } = setupCloseButton(tool);
+    button.handlers.click();
+    assert.equal($(`panel-${tool}`).hidden, true);
+    assert.equal(context.activePreviewMenu, tool);
+    assert.deepEqual(calls, [`focus:open-${tool}`]);
+  }
+});
+
+test('closing text settings by pointer keeps the draft and its selection', () => {
+  const { context, calls, pointerdown, button } = setupCloseButton('text');
+  const draft = { editor: {} };
+  context.textEdit = draft;
+  context.selectedAnnotationId = 'text';
+  pointerdown({ target: 'close-menu' });
+  button.handlers.click();
+  assert.equal(context.previewMenuOpen, false);
+  assert.equal(context.textEdit, draft);
+  assert.equal(context.selectedAnnotationId, 'text');
+  assert.deepEqual(calls, ['format', 'focus:open-text']);
+});
 
 function selectedSetup(tool) {
   const env = setup(tool);

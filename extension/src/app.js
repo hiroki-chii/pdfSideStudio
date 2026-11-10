@@ -802,6 +802,14 @@ for (const name of previewMenus) {
     $('open-select').focus({ preventScroll: true });
   });
 }
+for (const button of document.querySelectorAll('[data-close-preview-menu]')) {
+  button.addEventListener('click', () => {
+    const name = button.dataset.closePreviewMenu;
+    if (!previewMenuOpen || $(`panel-${name}`).hidden) return;
+    togglePreviewMenu(name);
+    if (!previewMenuOpen) $(`open-${name}`).focus({ preventScroll: true });
+  });
+}
 $('start-pen').addEventListener('click', () => openPreviewMenu('pen'));
 $('watermark-opacity').addEventListener('input', () => { $('watermark-opacity-value').value = `${$('watermark-opacity').value}%`; });
 
@@ -1109,7 +1117,7 @@ document.addEventListener('pointerdown', event => {
     return;
   }
   if (!event.target.closest('.text-settings, .pen-style-settings')) finishAnnotationFormatting();
-  if (event.target.closest('#confirm-text, #cancel-text, #close-text, #previous, #next, .preview-tool-button, .preview-zoom')) return;
+  if (event.target.closest('#confirm-text, #cancel-text, #close-text, #previous, #next, .preview-tool-button, .preview-zoom, [data-close-preview-menu]')) return;
   if (!textEdit || event.target === textEdit.editor || textEdit.editor.contains?.(event.target) || event.target.closest('.text-settings')) return;
   if (!finishTextEdit()) { event.preventDefault(); event.stopImmediatePropagation(); }
 }, true);

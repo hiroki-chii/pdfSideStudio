@@ -75,6 +75,8 @@ dialog.fullscreen-preview{position:fixed;inset:0;width:100vw;height:100dvh;max-w
 .tool-settings,.preview-menu .text-settings{display:grid;align-items:stretch;gap:8px}
 .preview-menu .tool-settings{margin:6px 0}
 .menu-heading-actions{display:flex;align-items:center;justify-content:flex-end;flex-shrink:0;gap:6px}
+.preview-menu-heading .menu-heading-actions{margin-left:auto}
+#close-save{min-height:32px;padding:5px 8px;font-size:11px;white-space:nowrap}
 .preview-menu .preview-menu-heading{flex-wrap:wrap;align-items:center}
 .preview-menu-heading h2{flex:1;min-width:6em}
 .tool-help-button{min-height:32px;padding:5px 8px;font-size:11px;color:var(--purple);background:var(--accent-soft);border-color:var(--border-accent);white-space:nowrap}
