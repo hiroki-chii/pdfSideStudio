@@ -32,7 +32,9 @@ const manifestBytes = await readFile(new URL('../dist/manifest.json', import.met
 const manifest = JSON.parse(manifestBytes);
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url)));
 assert.equal(manifest.version, packageJson.version);
-assert.deepEqual(manifest.permissions, ['sidePanel']);
+assert.deepEqual(manifest.permissions, ['sidePanel', 'activeTab']);
+assert.equal(manifest.host_permissions, undefined);
+assert.deepEqual(manifest.optional_host_permissions, ['<all_urls>']);
 assert.match(manifest.content_security_policy.extension_pages, /connect-src 'self'/);
 assert.match(manifest.content_security_policy.extension_pages, /worker-src 'self'/);
 const archive = unzipSync(new Uint8Array(await readFile(new URL('../release/pdf-side-studio.zip', import.meta.url))));

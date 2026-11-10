@@ -561,6 +561,70 @@ async function addFiles(files) {
   status(errors.length ? `${added.length}ページ追加。${errors.join(' / ')}` : `${added.length}ページを追加しました。追加順に結合して保存できます。`, errors.length ? 'error' : 'success');
 }
 
+const captureSiteAccess = { origins: ['<all_urls>'] };
+let captureAccessGranted = false;
+
+function updateCaptureAccess(granted) {
+  captureAccessGranted = granted;
+  $('capture-tab').textContent = granted ? '表示中のタブを取り込む' : 'サイトへのアクセスを許可して取り込む';
+  $('capture-tab').hidden = false;
+  if (granted) $('capture-tab-once').hidden = true;
+}
+
+function refreshCaptureAccess() {
+  return chrome.permissions.contains(captureSiteAccess).then(updateCaptureAccess).catch(console.error);
+}
+
+async function verifyCaptureTab(tab) {
+  const [active] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+  if (active?.id !== tab.id || (tab.url && active.url && active.url !== tab.url)) {
+    throw new Error('取り込み中に表示ページが変わりました。もう一度お試しください。');
+  }
+}
+
+async function captureVisibleTab(tab, justGranted) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await verifyCaptureTab(tab);
+    try {
+      return await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    } catch (error) {
+      const needsAccess = /activeTab|<all_urls>/i.test(error.message);
+      if (attempt === 0 && ((justGranted && needsAccess) || /image readback failed|view is invisible/i.test(error.message))) {
+        // Chrome may still be restoring access or the tab surface after the permission dialog.
+        await new Promise(resolve => setTimeout(resolve, 350));
+        continue;
+      }
+      if (needsAccess) {
+        await refreshCaptureAccess();
+        throw new Error('対象タブでツールバーの PDF Side Studio アイコンを押してから、もう一度お試しください。');
+      }
+      throw new Error('タブの表示範囲を取り込めませんでした。対象タブを表示して、もう一度お試しください。');
+    }
+  }
+}
+
+async function captureTab(requestAccess) {
+  status(requestAccess ? 'Chrome の確認画面でサイトへのアクセスを許可してください。' : '表示中のタブを取り込んでいます…');
+  const [[tab], granted] = await Promise.all([
+    chrome.tabs.query({ active: true, currentWindow: true }),
+    requestAccess ? chrome.permissions.request(captureSiteAccess) : true,
+  ]);
+  if (!granted) {
+    $('capture-tab-once').hidden = false;
+    status('一時アクセスで取り込むには、対象タブでツールバーの PDF Side Studio アイコンを押し、「このタブだけ取り込む」を選んでください。');
+    return;
+  }
+  if (requestAccess) updateCaptureAccess(true);
+  if (!tab) throw new Error('取り込めるタブが見つかりません。');
+  status('表示中のタブを取り込んでいます…');
+  const dataUrl = await captureVisibleTab(tab, requestAccess);
+  await verifyCaptureTab(tab);
+  const pngPrefix = 'data:image/png;base64,';
+  if (!dataUrl.startsWith(pngPrefix)) throw new Error('タブの画像を取得できませんでした。');
+  const bytes = Uint8Array.from(globalThis.atob(dataUrl.slice(pngPrefix.length)), char => char.charCodeAt(0));
+  await addFiles([new globalThis.File([bytes], 'タブのキャプチャ.png', { type: 'image/png' })]);
+}
+
 function rotate(angle) {
   const all = $('rotation-scope').value === 'all';
   const ids = new Set((all ? model.pages : [activeRequired()]).map(p => p.id));
@@ -600,6 +664,13 @@ async function splitPdf() {
 }
 
 function on(id, action) { $(id).addEventListener('click', () => run(action)); }
+if (globalThis.chrome?.tabs?.captureVisibleTab) {
+  chrome.permissions.onAdded.addListener(refreshCaptureAccess);
+  chrome.permissions.onRemoved.addListener(refreshCaptureAccess);
+  refreshCaptureAccess();
+  on('capture-tab', () => captureTab(!captureAccessGranted));
+  on('capture-tab-once', () => captureTab(false));
+}
 $('add-files').addEventListener('click', () => $('file-input').click());
 $('file-input').addEventListener('change', event => {
   const files = [...event.target.files]; event.target.value = '';

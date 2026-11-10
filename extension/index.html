@@ -14,9 +14,11 @@
       </header>
       <main>
         <div class="theme-row"><button id="theme-mode" class="theme-toggle" type="button" data-mode="system" aria-label="表示モード: デバイスと同じ。クリックでダークに切り替え" title="表示モード: デバイスと同じ（次: ダーク）"><svg data-theme-icon="dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14a8.5 8.5 0 0 1-10.5-10.5A8.5 8.5 0 1 0 20.5 14Z" /></svg><svg data-theme-icon="light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg><svg data-theme-icon="system" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M9 21h6m-3-4v4" /></svg></button></div>
-        <section id="drop-zone" class="upload-card" aria-label="PDF・画像を追加">
+        <section id="drop-zone" class="upload-card" aria-label="ページを追加">
           <input id="file-input" type="file" accept="application/pdf,.pdf,image/jpeg,.jpg,.jpeg,image/png,.png,image/webp,.webp" multiple hidden />
           <button id="add-files" class="upload-button"><span class="upload-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2v20M2 12h20" /></svg></span><span><strong>PDF・画像を追加</strong><small>クリック、またはここにドロップ</small></span><span class="file-tag" aria-hidden="true">PDF / 画像</span></button>
+          <button id="capture-tab" class="capture-tab-button" type="button" hidden>表示中のタブを取り込む</button>
+          <button id="capture-tab-once" class="capture-tab-button" type="button" hidden>このタブだけ取り込む</button>
           <p class="privacy"><span aria-hidden="true">◈</span> 端末内で処理 · アップロード不要</p>
         </section>
         <div id="status" class="status" role="status" aria-live="polite">PDF・JPEG・PNG・WebPに対応しています。</div>
@@ -177,6 +179,7 @@
     <dialog id="help-dialog">
       <div class="dialog-heading"><h2>使い方</h2><button id="close-help" class="icon-button" aria-label="使い方を閉じる">×</button></div>
       <ol><li>PDFや画像（JPEG・PNG・WebP）を追加します。画像は1枚につき1ページになり、複数ファイルは追加順に結合されます。</li><li>プレビュー上のページ一覧をドラッグして順序を変更します。クリックするとプレビューが切り替わり、そのページのコピー・削除を選べます。</li><li>コピー・削除はページ一覧から選んだページに適用します。回転・透かしは表示中のページ／すべてのページを指定できます。</li><li>「PDFを保存」で全ページを出力します。分割は保存画面から実行します。</li></ol>
+      <p>初回は「サイトへのアクセスを許可して取り込む」を押し、Chromeでサイトへのアクセスを許可します。開いているサイドパネルに、タブで見えている範囲が画像として1ページ追加されます。許可を見送る場合は、対象タブでツールバーの PDF Side Studio アイコンを押し、「このタブだけ取り込む」を選びます。</p>
       <p>分割では全ページを1ページずつPDFにしてZIPで保存します。</p>
       <p>パスワード保護PDFは非対応です。既存の注釈・リンク・添付ファイル・起動アクションは保存時に引き継ぎません。フォーム入力値等の保持は保証しません。電子署名は無効になります。元ファイルを残し、保存後のPDFを確認してください。</p>
       <p>1ファイル50MiB、合計150MiB・300ページまで。編集履歴は直近30操作を保持します。安全上限を超える複雑なPDFは読み込めない場合があります。</p>

@@ -353,11 +353,12 @@ for (const rotation of [0, 90, 180, 270]) for (const userUnit of [1, 2]) {
   });
 }
 
-test('manifest uses only sidePanel permission and a local worker entry', async () => {
+test('manifest requires only sidePanel and temporary tab access, with opt-in site access', async () => {
   const manifest = JSON.parse(await readFile('public/manifest.json', 'utf8'));
   assert.equal(manifest.manifest_version, 3);
-  assert.deepEqual(manifest.permissions, ['sidePanel']);
+  assert.deepEqual(manifest.permissions, ['sidePanel', 'activeTab']);
   assert.equal(manifest.host_permissions, undefined);
+  assert.deepEqual(manifest.optional_host_permissions, ['<all_urls>']);
   assert.ok(!manifest.content_security_policy.extension_pages.includes('unsafe-eval'));
   assert.equal(manifest.side_panel.default_path, 'index.html');
 });
