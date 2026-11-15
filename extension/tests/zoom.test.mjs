@@ -8,7 +8,7 @@ import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
 const previewScript = app.slice(app.indexOf('function setPreviewZoom('), app.indexOf('\nasync function addFiles('));
 
-async function setup(width = 220) {
+async function setup(width = 220, editorTab = false) {
   const doc = await PDFDocument.create();
   doc.addPage([600, 800]); doc.addPage([800, 600]);
   const pdf = await pdfjs.getDocument({ data: await doc.save() }).promise;
@@ -25,7 +25,7 @@ async function setup(width = 220) {
     return nodes.get(id);
   };
   const draws = [], paints = [], errors = [];
-  const context = vm.createContext({ $, Math, busy: false, stroke: null, annotationDrag: null, pageDrag: null,
+  const context = vm.createContext({ $, Math, editorTab, busy: false, stroke: null, annotationDrag: null, pageDrag: null,
     previewZoom: 1, minPreviewZoom: 0.5, maxPreviewZoom: 4, renderedPageId: null,
     viewport: null, renderTask: null, renderVersion: 0, model: { pages, active: pages[0] },
     window: { devicePixelRatio: 2 }, updateControls() {}, refreshAnnotationHandles() {},
@@ -85,6 +85,20 @@ test('zoom is retained across pages, rotation and resizing; changing pages reset
     assert.equal(context.viewport.width / context.viewport.height, 600 / 800);
     assert.equal(parseFloat($('canvas-stack').style.width), (160 - 12) * 2);
     assert.equal(context.previewZoom, 2);
+  } finally { await env.close(); }
+});
+
+test('tab editor fits the available height and caps the pixel dimensions at high zoom', async () => {
+  const env = await setup(2200, true);
+  try {
+    const { context, $, settle } = env;
+    $('preview-scroll').clientHeight = 1500;
+    await context.renderPreview();
+    assert.equal(parseFloat($('canvas-stack').style.height), 1466);
+    assert.equal($('preview-scroll').style.height, undefined);
+    context.setPreviewZoom(4);
+    await settle();
+    assert.equal($('pdf-canvas').height, 4096);
   } finally { await env.close(); }
 });
 

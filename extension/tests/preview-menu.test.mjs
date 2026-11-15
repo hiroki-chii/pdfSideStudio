@@ -31,7 +31,7 @@ function setup(tool) {
   };
   const context = vm.createContext({ $, document: {
     addEventListener(type, handler, capture) { documentHandlers[type] = { handler, capture }; },
-  }, previewMenuOpen: true, penEnabled: tool === 'pen', textEnabled: tool === 'text',
+  }, editorTab: false, previewMenuOpen: true, penEnabled: tool === 'pen', textEnabled: tool === 'text',
   busy: false, stroke: null, annotationDrag: null, pageDrag: null, selectedAnnotationId: null, selectedStrokeIds: new Set(), selectedTextIds: new Set(),
   activePreviewMenu: tool, textEdit: null, viewport: {}, renderedPageId: 'page',
   model: { activeId: 'page', active: { rotation: 0, strokes: [] },
@@ -107,6 +107,15 @@ test('closing text settings by pointer keeps the draft and its selection', () =>
   assert.equal(context.textEdit, draft);
   assert.equal(context.selectedAnnotationId, 'text');
   assert.deepEqual(calls, ['format', 'focus:open-text']);
+});
+
+test('tab editor lets the first paper gesture edit with the sidebar settings open', () => {
+  const { context, pointerdown, calls } = setup('stamp');
+  context.editorTab = true;
+  const event = pointerdown();
+  assert.equal(event.stopped, undefined);
+  assert.equal(context.previewMenuOpen, true);
+  assert.ok(calls.includes('place-stamp'));
 });
 
 function selectedSetup(tool) {

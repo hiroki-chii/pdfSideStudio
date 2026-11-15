@@ -1,0 +1,265 @@
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-actions button { flex-shrink: 0; }
+#open-editor-tab {
+  padding: 5px 8px;
+  font-size: 11px;
+  color: var(--purple);
+  border-color: var(--border-accent);
+}
+
+.editor-tab .app {
+  --tools-width: clamp(148px, 26vw, 320px);
+  --pages-width: clamp(100px, 16vw, 196px);
+  display: grid;
+  grid-template-columns: var(--tools-width) minmax(0, 1fr) var(--pages-width);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "tools header pages"
+    "tools main pages";
+  max-width: none;
+  height: 100dvh;
+}
+
+.editor-tab .app:has(> .editor-sidebar[hidden]) { --tools-width: 0px; }
+.editor-tab .app:has(> .page-list-section[hidden]) { --pages-width: 0px; }
+
+.editor-tab .app-header {
+  grid-area: header;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.editor-tab main {
+  grid-area: main;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  padding: 0;
+}
+
+.editor-tab .theme-row { display: none; }
+
+.editor-sidebar {
+  grid-area: tools;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.editor-tab .upload-card { width: fit-content; border: 0; background: transparent; }
+.editor-tab .upload-button {
+  width: auto;
+  min-height: 34px;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.editor-tab .upload-icon { width: 16px; height: 16px; background: transparent; }
+.editor-tab .upload-icon svg { width: 16px; height: 16px; }
+.editor-tab .upload-card :is(.privacy, .file-tag, small) { display: none; }
+.editor-tab #status:empty { min-height: 0; padding: 0; }
+.editor-tab.dragging::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 3px var(--purple);
+}
+
+.editor-sidebar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.editor-sidebar-actions .upload-card { margin-inline-end: auto; }
+.editor-sidebar-actions .upload-button {
+  border-color: var(--accent-fill);
+  border-radius: 10px;
+  background: var(--accent-fill);
+  color: #fff;
+  box-shadow: 0 3px 12px var(--shadow);
+}
+.editor-sidebar-actions .upload-button:hover:not(:disabled) {
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
+}
+.editor-sidebar-actions .upload-icon { color: inherit; }
+
+.editor-sidebar .document-actions { position: static; }
+.editor-sidebar-actions .save-launcher {
+  border-color: var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: none;
+}
+.editor-sidebar-actions .save-launcher:hover:not(:disabled) {
+  border-color: var(--border-accent);
+  background: var(--surface-hover);
+}
+
+.editor-sidebar .preview-toolbar { padding: 0; border: 0; }
+.editor-sidebar .preview-tools {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.editor-sidebar .preview-tools .preview-tool-button {
+  width: 100%;
+  height: 48px;
+  padding: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.editor-sidebar .preview-menu-layer { position: static; }
+.editor-sidebar .preview-menu-layer .preview-menu {
+  position: static;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.editor-tab .page-list-section {
+  grid-area: pages;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin: 0;
+  padding: 12px 12px 0;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.editor-tab .source-legend { max-height: min(20dvh, 120px); overflow: auto; flex-shrink: 0; }
+.editor-tab .page-list {
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 4px;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.editor-tab .page-card { flex: none; }
+.editor-tab .page-card.drop-before::before,
+.editor-tab .page-card.drop-after::after {
+  inset: auto 0;
+  width: auto;
+  height: 3px;
+}
+.editor-tab .page-card.drop-before::before { top: -5px; }
+.editor-tab .page-card.drop-after::after { bottom: -5px; }
+.editor-tab .page-card:first-child.drop-before::before { top: 0; }
+.editor-tab .page-card:last-child.drop-after::after { bottom: 0; }
+
+.editor-tab #workspace, .editor-tab #empty-state { grid-area: 1 / 1; }
+.editor-tab #workspace { padding: 0; }
+.editor-tab #empty-state { align-self: center; overflow: auto; max-height: 100%; }
+.editor-tab #empty-state:has(> #drop-zone) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(min-content, 1fr) auto minmax(min-content, 1fr);
+  align-self: stretch;
+  justify-items: center;
+  padding: 12px;
+  scrollbar-gutter: stable both-edges;
+}
+.editor-tab #empty-state:has(> #drop-zone) > .empty-state-heading { align-self: end; margin-bottom: 12px; }
+.editor-tab #empty-state > #drop-zone { grid-row: 2; width: min(100%, 248px); }
+.editor-tab #empty-state .upload-button {
+  width: 100%;
+  min-height: 56px;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-color: var(--purple);
+  background: var(--purple);
+  color: var(--bg);
+  text-align: center;
+}
+.editor-tab #empty-state .upload-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--purple) 88%, var(--ink));
+}
+.editor-tab #empty-state .upload-button strong { font-size: 16px; }
+.editor-tab #empty-state .upload-icon,
+.editor-tab #empty-state .upload-icon svg { width: 20px; height: 20px; }
+.editor-tab #empty-state .upload-icon { color: inherit; }
+.editor-tab #empty-state:has(> #drop-zone) > .empty-state-details { align-self: start; max-width: 420px; }
+
+@media (max-height: 620px) {
+  .editor-tab #empty-state:has(> #drop-zone) .paper-art {
+    height: 105px;
+    margin-bottom: 12px;
+    transform: scale(.78);
+    transform-origin: top center;
+  }
+  .editor-tab #empty-state .empty-state-details #status:not(:empty) { min-height: 0; padding-block: 6px; }
+}
+
+.editor-tab .preview-section {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
+.editor-tab .preview-area { min-height: 0; min-width: 0; }
+.editor-tab .preview-scroll { height: 100%; overscroll-behavior: contain; }
+
+@media (max-width: 560px) {
+  .editor-tab .app {
+    --tools-width: clamp(124px, 28vw, 148px);
+    --pages-width: clamp(66px, 16vw, 92px);
+  }
+  .editor-tab .app-header {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-inline: 8px;
+  }
+  .editor-tab .brand { gap: 6px; }
+  .editor-tab .brand-mark { flex-shrink: 0; }
+  .editor-sidebar { padding: 8px; }
+  .editor-sidebar-actions,
+  .editor-sidebar .document-actions { gap: 4px; }
+  .editor-sidebar .print-launcher { width: 32px; height: 34px; padding: 5px; }
+  .editor-sidebar .save-launcher { min-height: 34px; padding: 6px 8px; }
+  .editor-sidebar .preview-tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .editor-sidebar .preview-menu { padding: 8px; }
+  .editor-sidebar .menu-heading-actions { flex-shrink: 1; flex-wrap: wrap; justify-content: flex-start; margin-left: 0; }
+  .editor-sidebar .tool-settings label { white-space: normal; }
+  .editor-sidebar .action-grid { grid-template-columns: minmax(0, 1fr); }
+  .editor-tab .page-list-section { padding: 6px 4px 0; }
+  .editor-tab #page-list-title { font-size: 11px; }
+  .editor-tab .page-list-section .count { margin-left: 2px; padding-inline: 3px; }
+  .editor-tab .page-card-actions { inset-inline: 0; gap: 2px; }
+  .editor-tab .page-card-actions .page-card-action { width: 19px; height: 24px; }
+  .editor-tab .page-button canvas { max-width: 100%; }
+  .editor-tab .preview-section .preview-area { padding: 0 0 78px; }
+  .editor-tab .preview-area .preview-nav { bottom: 78px; }
+  .editor-tab .preview-topbar { flex-wrap: wrap; }
+  .editor-tab .preview-history { flex-wrap: wrap; max-width: 100%; }
+  .editor-tab .preview-history button { padding-inline: 4px; }
+  .editor-tab .preview-zoom { left: 4px; max-width: calc(100% - 8px); flex-wrap: wrap; gap: 2px; }
+  .editor-tab .preview-zoom button { padding-inline: 3px; }
+  .editor-tab .preview-zoom output { min-width: 30px; }
+}

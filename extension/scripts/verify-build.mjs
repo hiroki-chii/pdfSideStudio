@@ -8,6 +8,7 @@ import { runPdfJob } from '../src/pdf-processor.js';
 const assets = await readdir(new URL('../dist/assets/', import.meta.url));
 const entry = assets.find(file => /^pdf-worker-.*\.js$/.test(file));
 assert.ok(entry, 'Dedicated PDF worker must be bundled');
+assert.ok(assets.some(file => /^editor-sync-worker-.*\.js$/.test(file)), 'Shared editor worker must be bundled');
 const moduleUrl = new URL(`../dist/assets/${entry}`, import.meta.url).href;
 const createWorker = () => {
   const thread = new Worker(new URL('../tests/helpers/pdf-worker-host.mjs', import.meta.url), { workerData: { module: moduleUrl } });

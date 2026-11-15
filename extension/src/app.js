@@ -1,19 +1,50 @@
 import './style.css';
 import './theme.css';
-import { EditorModel, safeFilename, normalizeRotation } from './model.js';
+import './editor-tab.css';
+import { EditorModel, safeFilename, normalizeRotation, sourceAppearance } from './model.js';
 import { paintOverlay, textFontFamily, textLayout, moveText, moveTextTail, strokeLayout, moveStroke, scaleStrokes, watermarkLayout, moveWatermark } from './pdf.js';
 import { createThemeController } from './theme.js';
 import { storePrintJob, deletePrintJob, purgeLegacyPrintJobs } from './print-job.js';
+import { createDocumentJobBroker } from './document-job.js';
+import { connectEditorSync, sharePdfSource } from './editor-sync.js';
 import { createFullscreenPreview } from './fullscreen-preview.js';
 import { styledRuns, textStyle, textBackground, formatTextBackground, formatText, replaceText } from './text-format.js';
 import { createTextEditor } from './text-editor.js';
 import { exportDocument } from './pdf-processor.js';
 import { createPageOverlay as createOverlay, createPrintPages } from './raster.js';
 import { download } from './download.js';
-import { readPdfSource, pdfErrorMessage } from './pdf-source.js';
+import { openPdfPreview, readPdfSource, pdfErrorMessage } from './pdf-source.js';
 import { createToolHelp } from './tool-help.js';
 
 const $ = id => document.getElementById(id);
+const editorUrl = new URL(location.href);
+const editorTab = editorUrl.searchParams.get('mode') === 'editor';
+const editorSessionTimeout = '編集データの受信期限が切れました。元の画面から新規タブを開き直してください。';
+const editorSessions = createDocumentJobBroker('pdf-side-studio-editor', editorSessionTimeout);
+window.addEventListener('pagehide', event => {
+  editorSessions.close();
+  if (!editorSync) return;
+  stopEditorSync();
+  if (event.persisted) status('画面間の同期を終了しました。この画面の編集は保存できます。');
+});
+
+if (editorTab) {
+  document.documentElement.classList.add('editor-tab');
+  document.title = '全画面編集 | PDF Side Studio';
+  const addButton = $('add-files');
+  addButton.setAttribute('aria-label', 'PDF・画像を追加');
+  addButton.title = 'PDF・画像を追加（画面内のどこにでもドロップできます）';
+  $('status').textContent = '';
+  $('open-fullscreen-preview').title = '全画面でプレビュー';
+  document.querySelector('.header-actions').prepend($('theme-mode'));
+  const sidebar = $('editor-sidebar');
+  $('editor-sidebar-actions').append($('document-actions'));
+  sidebar.append(document.querySelector('.preview-toolbar'), document.querySelector('.preview-menu-layer'));
+  document.querySelector('.app-header').after(sidebar);
+  document.querySelector('.app').append($('page-list-section'));
+  for (const button of document.querySelectorAll('[data-close-preview-menu], #close-stamp')) button.remove();
+} else $('open-editor-tab').hidden = false;
+
 for (const option of $('text-font').options) {
   option.style.fontFamily = textFontFamily(option.value);
 }
@@ -24,7 +55,10 @@ createThemeController({ root: document.documentElement, button: $('theme-mode'),
   colorScheme: window.matchMedia('(prefers-color-scheme: dark)'), storage: themeStorage });
 const model = new EditorModel();
 const sources = new Map();
-const sourceColors = ['#d97757', '#398ba0', '#8a68c4', '#5c9a64', '#c28730', '#c45f88', '#5d7ec8', '#8d8b43'];
+let editorSync;
+let sidePanelSyncName;
+let localEditorTab;
+let syncUpdateTimer;
 const thumbnails = new WeakMap();
 let busy = false;
 let penEnabled = false;
@@ -59,7 +93,7 @@ let activePreviewMenu = 'select';
 let previewMenuOpen = false;
 const toolDescriptions = {
   'open-select': '追加した文字・描画・透かしをクリックして選択。ドラッグで移動、Deleteで削除。Escで選択モードに戻ります。',
-  'open-pen': '色・太さ・透明度を設定して紙面をドラッグ。「描画を終了」またはEscで選択モードに戻ります。',
+  'open-pen': '色・太さ・透明度を設定して紙面をドラッグ。「選択」またはEscで選択モードに戻ります。',
   'open-text': '紙面をクリックしてテキストを1つ追加。「入力を確定」で選択モードに戻ります。配置前のEscで終了。',
   'open-stamp': '紙面をクリックするたびに番号を配置し、次の番号を1つ増やします。Escで選択モードに戻ります。',
   'open-rotation': '対象ページを選び、方向ボタンまたはCtrl＋←／→で左右90度ずつ回転。「元に戻す」で取り消せます。',
@@ -134,6 +168,7 @@ function updateControls() {
   $('delete-stroke').disabled = busy || !selectedStroke();
   const strokeCount = selectedStrokes().length;
   $('pen-menu-title').textContent = strokeCount > 1 ? `選択した描画（${strokeCount}件）` : selectedStroke() ? '選択した描画' : 'ペンの設定';
+  $('close-pen').hidden = editorTab && !strokeSelected;
   $('close-pen').textContent = selectedStroke() ? '選択を解除' : '描画を終了';
   $('pen-drawing-settings').hidden = !!selectedStroke();
   $('pen-shape-settings').hidden = strokeSelected;
@@ -141,18 +176,19 @@ function updateControls() {
   $('pen-mode-hint').textContent = selectedStroke()
     ? strokeCount > 1 ? '太さ・透明度は各描画の元の値に同じ差分を適用します。スライダーの数値は最後に選んだ描画の値です。色は選択全体に適用します。'
       : '色・太さ・透明度は選択した描画だけにすぐ反映されます。Shift＋クリックで描画を追加選択できます。'
-    : '紙面をドラッグして描きます。終了するには「描画を終了」かEsc。';
+    : '紙面をドラッグして描きます。「選択」またはEscで選択モードに戻ります。';
   $('text-menu-title').textContent = textEdit ? 'テキストを入力中' : textCount > 1 ? `選択したテキスト（${textCount}件）` : selectedText() ? '選択したテキスト' : 'テキストを配置';
   $('text-mode-hint').textContent = textEdit ? '文字書式は選択範囲に、背景はボックス全体に適用します。'
     : textCount > 1 ? `選択した${textCount}件に一括適用。サイズは差を保ち、8〜96ptの最初の境界で全体が止まります。`
       : selectedText() ? '文字・背景をすぐ反映。Shift＋クリックで追加選択・解除できます。'
       : 'ボックスの形を選び、紙面をクリックして入力します。';
+  $('close-text').hidden = editorTab && (!selectedText() || !!textEdit);
   $('close-text').textContent = textEdit ? '確定して終了' : selectedText() ? '選択を解除' : '配置を終了';
   $('text-selection-actions').hidden = !selectedText() || !!textEdit;
   $('text-edit-actions').hidden = !textEdit;
   $('text-edit-hint').textContent = selectedText() && !textEdit
     ? 'Shift＋クリックで追加選択・解除。複数選択中はドラッグ・方向キーでまとめて移動、Deleteで削除。ダブルクリックで個別編集。Escまたは空白クリックで選択を解除します。'
-    : '外側クリック・Ctrl+Enter・Escで入力を確定。「入力を取り消す」で変更を取り消します。書式は上の「テキスト」アイコンから設定できます。';
+    : '外側クリック・Ctrl+Enter・Escで入力を確定。「入力を取り消す」で変更を取り消します。書式は「テキスト」ツールから設定できます。';
   $('open-text').hidden = !model.pages.length;
   $('open-text').disabled = busy || !model.active || strokeSelected;
   $('open-text').setAttribute('aria-pressed', String(textSelected || activePreviewMenu === 'text'));
@@ -206,22 +242,42 @@ function updateControls() {
 function refresh() {
   if (selectedAnnotation()) selectAnnotation(selectedAnnotation(), { preserve: true });
   const hasPages = model.pages.length > 0;
+  const hasHistory = model.past.length > 0 || model.future.length > 0;
   if (!hasPages) { previewMenuOpen = false; penEnabled = false; textEnabled = false; resetPreviewMenu(); }
   for (const name of previewMenus) $(`open-${name}`).hidden = !hasPages;
   $('page-list-section').hidden = !hasPages;
-  $('workspace').hidden = !hasPages && !model.past.length && !model.future.length;
+  if (editorTab) {
+    const starting = !hasPages && !hasHistory;
+    const sidebar = $('editor-sidebar');
+    sidebar.hidden = starting;
+    document.querySelector('.preview-toolbar').hidden = !hasPages;
+    const destination = starting ? $('empty-state') : $('editor-sidebar-actions');
+    const upload = $('drop-zone');
+    if (upload.parentElement !== destination) {
+      $('add-files').querySelector('strong').textContent = starting ? 'PDF・画像を追加' : '追加';
+      if (starting) {
+        destination.querySelector('.empty-state-heading').after(upload);
+        destination.querySelector('.empty-state-details').append($('status'));
+      } else {
+        destination.prepend(upload);
+        destination.before($('status'));
+      }
+    }
+  }
+  $('workspace').hidden = !hasPages && !hasHistory;
   $('empty-state').hidden = hasPages;
   $('open-save').hidden = !hasPages;
   $('document-actions').hidden = !hasPages;
   if (!hasPages && $('save-dialog').open) $('save-dialog').close();
   // Keep history controls available when deleting or undoing the last page.
-  document.querySelector('.preview-section').hidden = !hasPages && !model.past.length && !model.future.length;
+  document.querySelector('.preview-section').hidden = !hasPages && !hasHistory;
   document.querySelector('.preview-heading').hidden = !hasPages;
   $('preview-area').hidden = !hasPages;
   document.querySelector('.preview-footer').hidden = !hasPages;
   $('page-count').textContent = model.pages.length;
   $('save-count').textContent = `${model.pages.length}ページ`;
   refreshThumbnails();
+  if (editorTab && hasPages) revealActiveThumbnail();
   updateControls();
   renderPreview();
 }
@@ -316,32 +372,35 @@ function clearDropMarker() {
   $('page-list').querySelectorAll('.drop-before, .drop-after').forEach(card => card.classList.remove('drop-before', 'drop-after'));
 }
 
-function insertionPoint(clientX) {
+function insertionPoint(x, y) {
   const cards = [...$('page-list').querySelectorAll('.page-card')];
   const before = cards.find(card => {
     const rect = card.getBoundingClientRect();
-    return clientX < rect.left + rect.width / 2;
+    return editorTab ? y < rect.top + rect.height / 2 : x < rect.left + rect.width / 2;
   });
   return { card: before || cards.at(-1), beforeId: before?.querySelector('button').dataset.id ?? null };
 }
 
-function showDropMarker(clientX) {
+function showDropMarker(x, y) {
   clearDropMarker();
-  const { card, beforeId } = insertionPoint(clientX);
+  const { card, beforeId } = insertionPoint(x, y);
   card?.classList.add(beforeId === null ? 'drop-after' : 'drop-before');
 }
 
 function scrollWhileDragging() {
   if (!draggedPageId) return;
-  if (dragPointer) {
+  if (dragPointer && insidePageList(dragPointer.x, dragPointer.y)) {
     const list = $('page-list');
     const rect = list.getBoundingClientRect();
-    const edge = 32;
-    const x = dragPointer.x;
-    if (x >= rect.left && x <= rect.right && dragPointer.y >= rect.top && dragPointer.y <= rect.bottom) {
-      const speed = x < rect.left + edge ? -Math.ceil((rect.left + edge - x) / 3)
-        : x > rect.right - edge ? Math.ceil((x - rect.right + edge) / 3) : 0;
-      if (speed) { list.scrollLeft += speed; showDropMarker(x); }
+    const { x, y } = dragPointer;
+    const [point, start, end, scroll] = editorTab ? [y, rect.top, rect.bottom, 'scrollTop']
+      : [x, rect.left, rect.right, 'scrollLeft'];
+    const edge = Math.min(32, (end - start) / 2);
+    const speed = point < start + edge ? -Math.ceil((start + edge - point) / 3)
+      : point > end - edge ? Math.ceil((point - end + edge) / 3) : 0;
+    if (speed) {
+      list[scroll] += speed;
+      showDropMarker(x, y);
     }
   }
   dragScrollFrame = requestAnimationFrame(scrollWhileDragging);
@@ -368,20 +427,20 @@ function updatePageDrag(event) {
     dragScrollFrame = requestAnimationFrame(scrollWhileDragging);
   }
   dragPointer = { x: event.clientX, y: event.clientY };
-  if (insidePageList(event)) showDropMarker(event.clientX); else clearDropMarker();
+  if (insidePageList(event.clientX, event.clientY)) showDropMarker(event.clientX, event.clientY); else clearDropMarker();
 }
 
-function insidePageList(event) {
+function insidePageList(x, y) {
   const rect = $('page-list').getBoundingClientRect();
-  return event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
 
 function dropPage(event) {
   if (!pageDrag || event.pointerId !== pageDrag.pointerId) return;
   const { id } = pageDrag;
   const wasDragging = !!draggedPageId;
-  const validDrop = insidePageList(event);
-  const { beforeId } = insertionPoint(event.clientX);
+  const validDrop = insidePageList(event.clientX, event.clientY);
+  const { beforeId } = insertionPoint(event.clientX, event.clientY);
   finishPageDrag();
   if (!wasDragging) return;
   if (!validDrop) return;
@@ -450,13 +509,19 @@ function navigatePage(offset) {
   const page = index >= 0 ? model.pages[index + offset] : null;
   if (!page) return;
   activate(page.id);
+  revealActiveThumbnail();
+}
+
+function revealActiveThumbnail() {
   // Keep the active thumbnail visible without scrolling away from the preview.
   const list = $('page-list');
   const card = list.querySelector('.page-card.active');
+  if (!card) return;
   const rect = card.getBoundingClientRect();
   const bounds = list.getBoundingClientRect();
-  if (rect.left < bounds.left) list.scrollLeft += rect.left - bounds.left - 2;
-  else if (rect.right > bounds.right) list.scrollLeft += rect.right - bounds.right + 2;
+  const [start, end, scroll] = editorTab ? ['top', 'bottom', 'scrollTop'] : ['left', 'right', 'scrollLeft'];
+  if (rect[start] < bounds[start]) list[scroll] += rect[start] - bounds[start] - 2;
+  else if (rect[end] > bounds[end]) list[scroll] += rect[end] - bounds[end] + 2;
 }
 
 function setPreviewZoom(value) {
@@ -502,10 +567,12 @@ async function renderPreview(anchor = null) {
     const base = page.getViewport({ scale: 1, rotation: record.rotation });
     const scroll = $('preview-scroll');
     const width = Math.max(1, scroll.clientWidth - 12);
-    const fitScale = Math.min(width / base.width, 390 / base.height);
+    const fitHeight = editorTab ? Math.max(1, scroll.clientHeight - 34) : 390;
+    const fitScale = Math.min(width / base.width, fitHeight / base.height);
     const cssScale = fitScale * previewZoom;
-    scroll.style.height = `${Math.max(140, base.height * fitScale + 34)}px`;
-    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    if (!editorTab) scroll.style.height = `${Math.max(140, base.height * fitScale + 34)}px`;
+    const ratioLimit = editorTab ? 4096 / (Math.max(base.width, base.height) * cssScale) : 2;
+    const ratio = Math.min(window.devicePixelRatio || 1, 2, ratioLimit);
     const nextViewport = page.getViewport({ scale: cssScale * ratio, rotation: record.rotation });
     $('canvas-stack').style.width = `${base.width * cssScale}px`;
     $('canvas-stack').style.height = `${base.height * cssScale}px`;
@@ -546,8 +613,7 @@ async function addFiles(files) {
         pageCount: model.pages.length + added.length,
       });
       const sourceId = uid();
-      sources.set(sourceId, { ...source,
-        number: sources.size + 1, color: sourceColors[sources.size % sourceColors.length] });
+      sources.set(sourceId, { ...source, ...sourceAppearance(sources.size + 1) });
       source.pages.forEach((page, index) => added.push({ id: uid(), sourceId, index, rotation: page.rotation, strokes: [], watermark: null }));
     } catch (error) {
       errors.push(`${file.name}: ${pdfErrorMessage(error)}`);
@@ -633,6 +699,7 @@ function rotate(angle) {
 }
 
 async function printPdf() {
+  await syncBeforeOutput();
   if (!model.pages.length) return;
   const pages = await createPrintPages(model.pages, sources,
     (done, total) => status(`印刷を準備中… ${done} / ${total}`));
@@ -646,8 +713,180 @@ async function printPdf() {
   } catch (error) { await deletePrintJob(id); throw error; }
 }
 
+async function openEditorTab() {
+  if (pageDrag) return;
+  if (await focusEditorTab()) {
+    status('編集中のタブを表示しました。', 'success');
+    return;
+  }
+  const url = new URL('index.html', document.baseURI);
+  url.searchParams.set('mode', 'editor');
+  const started = !editorSync;
+  if (started) {
+    const initial = {
+      ...model.sessionSnapshot(), sources: [...sources].map(([id, source]) => [id, sharePdfSource(source)]),
+    };
+    await startEditorSync(sidePanelSyncName ?? uid(), { initial });
+  }
+  const id = uid();
+  editorSessions.store(id, {
+    syncName: editorSync.name, sessionId: editorSync.sessionId,
+    activeId: model.activeId, outputName: $('output-name').value, zoom: previewZoom,
+  });
+  url.hash = id;
+  try {
+    if (globalThis.chrome?.tabs?.create) {
+      const tab = await chrome.tabs.create({ url: url.href, active: true });
+      await editorSync.rememberEditorTab(tab.id);
+    } else {
+      localEditorTab = window.open(url.href, '_blank');
+      if (!localEditorTab) throw new Error('編集タブを開けませんでした。ポップアップを許可して再度お試しください。');
+    }
+    status('新規タブでエディタを開きました。', 'success');
+  } catch (error) {
+    editorSessions.remove(id);
+    if (started) stopEditorSync();
+    throw error;
+  }
+}
+
+async function focusEditorTab() {
+  if (localEditorTab && !localEditorTab.closed) {
+    localEditorTab.focus();
+    return true;
+  }
+  if (!editorSync || !globalThis.chrome?.tabs?.update) return false;
+  const tabId = await editorSync.getEditorTab();
+  if (tabId === null) return false;
+  const active = await chrome.tabs.update(tabId, { active: true }).catch(async error => {
+    if (await chrome.tabs.get(tabId).catch(() => null)) throw error;
+    return null;
+  });
+  if (!active) return false;
+  await chrome.windows.update(active.windowId, { focused: true });
+  return true;
+}
+
+async function restoreEditorSession(id) {
+  status('元の編集画面に接続しています…');
+  const invitation = await editorSessions.read(id);
+  if (!invitation) throw new Error(editorSessionTimeout);
+  const tab = await globalThis.chrome?.tabs?.getCurrent?.();
+  const sync = await startEditorSync(invitation.syncName, { sessionId: invitation.sessionId, tabId: tab?.id });
+  await displayJoinedSession(sync, '元の編集画面と同期しています。', invitation);
+}
+
+async function reconnectSidePanel() {
+  if (await chrome.tabs.getCurrent()) return;
+  const { id } = await chrome.windows.getCurrent();
+  if (!Number.isInteger(id) || id < 0) return;
+  sidePanelSyncName = `pdf-side-studio-window-${id}`;
+  const sync = await startEditorSync(sidePanelSyncName, { allowMissing: true });
+  if (sync) await displayJoinedSession(sync, '編集中のタブと再同期しました。');
+}
+
+async function displayJoinedSession(sync, message, view) {
+  try {
+    const session = sync.snapshot();
+    await displayEditorSession(session, view);
+    sync.markDisplayed(session.revision);
+    status(message, 'success');
+  } catch (error) { stopEditorSync(); throw error; }
+}
+
+async function startEditorSync(name, options) {
+  const sync = await connectEditorSync(name, {
+    ...options, onUpdate: queueEditorSync, onError(error) { stopEditorSync(); fail(error); },
+  });
+  if (!sync) return null;
+  editorSync = sync;
+  model.onChange = change => sync.submit(change, sources);
+  return sync;
+}
+
+function stopEditorSync() {
+  editorSync?.close();
+  editorSync = null;
+  model.onChange = null;
+  clearTimeout(syncUpdateTimer);
+  syncUpdateTimer = null;
+}
+
+async function displayEditorSession({ state, past, future, sources: sharedSources }, view = {}) {
+  const restored = new Map(), opened = [];
+  try {
+    for (const [sourceId, { blob, ...source }] of sharedSources) {
+      const local = sources.get(sourceId);
+      if (local) {
+        restored.set(sourceId, { ...local, number: source.number, color: source.color });
+        continue;
+      }
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const preview = await openPdfPreview(bytes, source.pages.length);
+      opened.push(preview);
+      restored.set(sourceId, { ...source, bytes, preview });
+    }
+  } catch (error) {
+    await Promise.allSettled(opened.map(preview => preview.loadingTask.destroy()));
+    throw error;
+  }
+  const activeId = view.activeId ?? model.activeId;
+  const oldIndex = model.pages.findIndex(page => page.id === activeId);
+  const fallback = state.pages[Math.min(oldIndex, state.pages.length - 1)]?.id;
+  const nextId = state.pages.some(page => page.id === activeId) ? activeId : fallback ?? state.activeId;
+  const wasEmpty = !model.pages.length;
+  for (const [id, { preview }] of sources) {
+    if (!restored.has(id)) preview.loadingTask.destroy().catch(console.error);
+  }
+  sources.clear();
+  for (const [sourceId, source] of restored) sources.set(sourceId, source);
+  model.restoreSession({ state: { ...state, activeId: nextId }, past, future });
+  if (view.outputName !== undefined) $('output-name').value = view.outputName;
+  if (wasEmpty && model.active && $('output-name').value === 'edited') {
+    $('output-name').value = safeFilename(sources.get(model.active.sourceId).outputName);
+  }
+  if (view.zoom !== undefined) previewZoom = view.zoom;
+  refresh();
+}
+
+async function applyEditorSyncUpdate() {
+  const sync = editorSync;
+  if (!sync?.needsUpdate) return;
+  const session = sync.snapshot();
+  await displayEditorSession(session);
+  sync.markDisplayed(session.revision);
+  return session.conflict;
+}
+
+function queueEditorSync(delay = 0) {
+  if (syncUpdateTimer || !editorSync?.needsUpdate) return;
+  syncUpdateTimer = setTimeout(async () => {
+    syncUpdateTimer = null;
+    if (!editorSync?.needsUpdate) return;
+    if (busy || stroke || annotationDrag || pageDrag || textEdit || textFormatSession || strokeFormatSession || annotationFormatPreview) {
+      queueEditorSync(80);
+      return;
+    }
+    setBusy(true);
+    try {
+      const conflict = await applyEditorSyncUpdate();
+      if (conflict) status(conflict, 'error');
+    } catch (error) { fail(error); }
+    finally { setBusy(false); }
+  }, delay);
+}
+
+async function syncBeforeOutput() {
+  if (!editorSync) return;
+  await editorSync.barrier();
+  const conflict = await applyEditorSyncUpdate();
+  if (conflict) throw new Error(conflict);
+}
+
 async function exportPdf() {
+  await syncBeforeOutput();
   const records = model.pages;
+  if (!records.length) return;
   const bytes = await exportDocument('export', records, sources, createOverlay, $('output-name').value,
     (done, total) => status(`PDFを作成中… ${done} / ${total}`));
   download(bytes, `${safeFilename($('output-name').value)}.pdf`, 'application/pdf');
@@ -655,7 +894,9 @@ async function exportPdf() {
 }
 
 async function splitPdf() {
+  await syncBeforeOutput();
   const records = model.pages;
+  if (!records.length) return;
   const base = safeFilename($('output-name').value);
   const bytes = await exportDocument('split', records, sources, createOverlay, base,
     (done, total) => status(`分割しています… ${done} / ${total}`));
@@ -664,7 +905,8 @@ async function splitPdf() {
 }
 
 function on(id, action) { $(id).addEventListener('click', () => run(action)); }
-if (globalThis.chrome?.tabs?.captureVisibleTab) {
+on('open-editor-tab', openEditorTab);
+if (globalThis.chrome?.tabs?.captureVisibleTab && !editorTab) {
   chrome.permissions.onAdded.addListener(refreshCaptureAccess);
   chrome.permissions.onRemoved.addListener(refreshCaptureAccess);
   refreshCaptureAccess();
@@ -677,16 +919,21 @@ $('file-input').addEventListener('change', event => {
   if (files.length) run(() => addFiles(files));
 });
 // Prevent dropped files from navigating the extension page.
+const dropHighlight = editorTab ? document.documentElement : $('drop-zone');
+const clearDropHighlight = () => dropHighlight.classList.remove('dragging');
 document.addEventListener('dragover', event => {
   event.preventDefault();
-  if (!draggedPageId && !busy && [...event.dataTransfer.types].includes('Files')) $('drop-zone').classList.add('dragging');
-});
-document.addEventListener('dragleave', event => { if (!event.relatedTarget) $('drop-zone').classList.remove('dragging'); });
+  const acceptsFiles = !draggedPageId && !busy && event.dataTransfer.types.includes('Files');
+  event.dataTransfer.dropEffect = acceptsFiles ? 'copy' : 'none';
+  dropHighlight.classList.toggle('dragging', acceptsFiles);
+}, true);
+document.addEventListener('dragleave', event => { if (!event.relatedTarget) clearDropHighlight(); });
 document.addEventListener('drop', event => {
-  event.preventDefault(); $('drop-zone').classList.remove('dragging');
+  event.preventDefault();
+  clearDropHighlight();
   if (draggedPageId) { finishPageDrag(); return; }
   const files = [...event.dataTransfer.files]; if (files.length) run(() => addFiles(files));
-});
+}, true);
 on('rotate-left', () => rotate(-90)); on('rotate-right', () => rotate(90));
 $('rotation-scope').addEventListener('change', updateControls);
 $('watermark-scope').addEventListener('change', updateControls);
@@ -1108,7 +1355,7 @@ document.addEventListener('pointerdown', event => {
     return;
   }
   // Dismiss tool settings before the preview can start an editing gesture.
-  if (previewMenuOpen && (!$('panel-pen').hidden || !$('panel-text').hidden || !$('panel-stamp').hidden)
+  if (!editorTab && previewMenuOpen && (!$('panel-pen').hidden || !$('panel-text').hidden || !$('panel-stamp').hidden)
     && event.target.closest('#preview-scroll') && !event.target.closest('.text-editor')
     && event.button === 0 && event.isPrimary) {
     previewMenuOpen = false;
@@ -1123,7 +1370,7 @@ document.addEventListener('pointerdown', event => {
 }, true);
 // Dismiss menus on other outside clicks after the target handles its action.
 document.addEventListener('click', event => {
-  if (!previewMenuOpen || event.target.closest('.preview-menu, .preview-tool-button, .text-handle, dialog')) return;
+  if (editorTab || !previewMenuOpen || event.target.closest('.preview-menu, .preview-tool-button, .text-handle, dialog')) return;
   previewMenuOpen = false;
   updateControls();
 });
@@ -1813,12 +2060,19 @@ document.addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); openSaveDialog(); }
 });
 let resizeTimer;
-let previewWidth = 0;
+let previewSize = '';
 new ResizeObserver(entries => {
-  const width = entries[0].contentRect.width;
-  if (width === previewWidth) return;
-  previewWidth = width;
+  const { width, height } = entries[0].contentRect;
+  const size = editorTab ? `${width}:${height}` : String(width);
+  if (size === previewSize) return;
+  previewSize = size;
   clearTimeout(resizeTimer); resizeTimer = setTimeout(() => renderPreview(), 120);
 }).observe($('preview-area'));
 refresh();
+if (editorTab && /^#[\da-f-]{36}$/.test(editorUrl.hash)) {
+  const id = editorUrl.hash.slice(1);
+  editorUrl.hash = '';
+  window.history.replaceState(null, '', editorUrl);
+  run(() => restoreEditorSession(id));
+} else if (!editorTab && globalThis.chrome?.windows?.getCurrent && globalThis.chrome?.tabs?.getCurrent) run(reconnectSidePanel);
 purgeLegacyPrintJobs().catch(fail);

@@ -22,6 +22,12 @@ export async function readPdfSource(file, { usedBytes, pageCount }) {
   if (usedBytes + size > MAX_TOTAL_BYTES) throw new Error(totalLimitMessage);
   const pages = pdf ? await runPdfJob({ type: 'load', bytes }) : [{ rotation: 0 }];
   if (pageCount + pages.length > MAX_PAGES) throw new Error(`${MAX_PAGES}ページを超えます。`);
+  const preview = await openPdfPreview(bytes, pages.length);
+  return { bytes, preview, pages, name: file.name, size,
+    outputName: pdf ? file.name : file.name.replace(imageExtension, '') };
+}
+
+export async function openPdfPreview(bytes, pageCount) {
   const loading = pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false,
     cMapUrl: new URL('cmaps/', document.baseURI).href, cMapPacked: true,
     standardFontDataUrl: new URL('standard_fonts/', document.baseURI).href,
@@ -34,9 +40,8 @@ export async function readPdfSource(file, { usedBytes, pageCount }) {
     const preview = await Promise.race([loading.promise, new Promise((_, reject) => {
       timer = setTimeout(() => reject(new PdfLimitError('プレビュー読み込み時間')), PDF_LIMITS.loadTimeout);
     })]);
-    if (preview.numPages !== pages.length) throw new Error('PDFのページ構造を確認できません。');
-    return { bytes, preview, pages, name: file.name, size,
-      outputName: pdf ? file.name : file.name.replace(imageExtension, '') };
+    if (preview.numPages !== pageCount) throw new Error('PDFのページ構造を確認できません。');
+    return preview;
   } catch (error) { loading.destroy().catch(() => {}); throw error; }
   finally { clearTimeout(timer); }
 }

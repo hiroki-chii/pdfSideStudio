@@ -5,10 +5,10 @@ import vm from 'node:vm';
 
 const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
 const captureCode = app.slice(app.indexOf('const captureSiteAccess'), app.indexOf('function rotate('));
-const captureControls = app.slice(app.indexOf('if (globalThis.chrome?.tabs?.captureVisibleTab)'),
+const captureControls = app.slice(app.indexOf('if (globalThis.chrome?.tabs?.captureVisibleTab && !editorTab)'),
   app.indexOf("$('add-files').addEventListener"));
 
-async function setup() {
+async function setup(editorTab = false) {
   const nodes = new Map(), actions = new Map(), events = [], files = [];
   const $ = id => {
     if (!nodes.has(id)) nodes.set(id, { hidden: true });
@@ -38,7 +38,7 @@ async function setup() {
     },
   };
   vm.runInNewContext(captureCode + captureControls, {
-    chrome, $, File, atob, console, setTimeout: callback => callback(),
+    chrome, $, File, atob, console, editorTab, setTimeout: callback => callback(),
     on: (id, action) => actions.set(id, action), status() {},
     addFiles: async added => files.push(...added),
   });
@@ -46,6 +46,13 @@ async function setup() {
   return { $, state, events, files, capture: actions.get('capture-tab'),
     captureOnce: actions.get('capture-tab-once'), permissionRemoved };
 }
+
+test('tab editor does not offer to capture its own tab', async () => {
+  const { $, capture, captureOnce } = await setup(true);
+  assert.equal($('capture-tab').hidden, true);
+  assert.equal(capture, undefined);
+  assert.equal(captureOnce, undefined);
+});
 
 test('first capture requests access before adding a page and later captures reuse the same panel', async () => {
   const { $, state, events, files, capture, permissionRemoved } = await setup();

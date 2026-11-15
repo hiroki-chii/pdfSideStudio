@@ -2,6 +2,8 @@ export const MAX_FILE_BYTES = 50 * 1024 * 1024;
 export const MAX_TOTAL_BYTES = 150 * 1024 * 1024;
 export const MAX_PAGES = 300;
 export const normalizeRotation = angle => ((angle % 360) + 360) % 360;
+const sourceColors = ['#d97757', '#398ba0', '#8a68c4', '#5c9a64', '#c28730', '#c45f88', '#5d7ec8', '#8d8b43'];
+export const sourceAppearance = number => ({ number, color: sourceColors[(number - 1) % sourceColors.length] });
 
 export function safeFilename(value) {
   return value.replace(/\.pdf$/i, '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim().slice(0, 100) || 'edited';
@@ -16,15 +18,19 @@ export class EditorModel {
   nextStampNumber = 1;
 
   snapshot() { return { pages: this.pages, activeId: this.activeId, nextStampNumber: this.nextStampNumber }; }
+  sessionSnapshot() { return { state: this.snapshot(), past: [...this.past], future: [...this.future] }; }
+  restoreSession({ state, past, future }) { this.restore(state); this.past = past; this.future = future; }
   restore(state) { this.pages = state.pages; this.activeId = state.activeId; this.nextStampNumber = state.nextStampNumber; }
   commit(pages, { activeId = this.activeId, nextStampNumber = this.nextStampNumber } = {}) {
     if (pages.length > MAX_PAGES) throw new Error(`一度に編集できるのは${MAX_PAGES}ページまでです。`);
-    this.past.push(this.snapshot());
+    const before = this.snapshot();
+    this.past.push(before);
     if (this.past.length > 30) this.past.shift();
     this.future = [];
     this.pages = pages;
     this.nextStampNumber = nextStampNumber;
     this.activeId = pages.some(p => p.id === activeId) ? activeId : (pages[0]?.id ?? null);
+    this.onChange?.({ type: 'commit', before, after: this.snapshot() });
   }
   update(ids, transform) { this.commit(this.pages.map(p => ids.has(p.id) ? transform(p) : p)); }
   moveBefore(id, beforeId = null) {
@@ -37,7 +43,17 @@ export class EditorModel {
     this.commit(pages);
     return true;
   }
-  undo() { if (!this.past.length) return; this.future.push(this.snapshot()); this.restore(this.past.pop()); }
-  redo() { if (!this.future.length) return; this.past.push(this.snapshot()); this.restore(this.future.pop()); }
+  undo() {
+    if (!this.past.length) return;
+    const before = this.snapshot();
+    this.future.push(before); this.restore(this.past.pop());
+    this.onChange?.({ type: 'undo', before, after: this.snapshot() });
+  }
+  redo() {
+    if (!this.future.length) return;
+    const before = this.snapshot();
+    this.past.push(before); this.restore(this.future.pop());
+    this.onChange?.({ type: 'redo', before, after: this.snapshot() });
+  }
   get active() { return this.pages.find(p => p.id === this.activeId); }
 }

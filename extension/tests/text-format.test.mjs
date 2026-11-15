@@ -68,7 +68,7 @@ function setup() {
       editor.setBackground = () => { editor.backgroundUpdated = true; };
       return editor;
     },
-    busy: false, selectedAnnotationId: 'text', selectedStrokeIds: new Set(), selectedTextIds: new Set(),
+    editorTab: false, busy: false, selectedAnnotationId: 'text', selectedStrokeIds: new Set(), selectedTextIds: new Set(),
     annotationFormatPreview: null, strokeFormatSession: null, textFormatSession: null, textEdit: null,
     textEnabled: false, textInsertionColor: '#222222', penEnabled: false, activePreviewMenu: 'text',
     previewMenuOpen: false, stroke: null, annotationDrag: null, pageDrag: null,

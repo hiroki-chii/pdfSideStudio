@@ -1,5 +1,5 @@
 const browserGlobals = ['window', 'document', 'chrome', 'self', 'console', 'performance', 'crypto',
-  'URL', 'Blob', 'Worker', 'BroadcastChannel', 'indexedDB', 'ResizeObserver', 'IntersectionObserver', 'location', 'Node', 'NodeFilter',
+  'URL', 'Blob', 'Worker', 'SharedWorker', 'BroadcastChannel', 'indexedDB', 'ResizeObserver', 'IntersectionObserver', 'location', 'Node', 'NodeFilter',
   'Event', 'setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame', 'structuredClone'];
 
 export default [{

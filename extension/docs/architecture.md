@@ -8,6 +8,10 @@
 - `src/text-format.js`、`src/text-editor.js`：文字・背景の書式モデルと、プレーンテキストとしての入力。
 - `src/theme.js`、`src/fullscreen-preview.js`：配色と一時プレビューの独立した制御。
 
+「新規タブで編集」でつながった画面は、同じSharedWorkerを使用します。`src/editor-sync-host.js` が操作を受信順に適用してUndo／Redoを管理し、PDFをBlobとしてメモリー上で保持します。`src/editor-operation.js` はページID・注釈IDと変更前の値を照合します。異なる箇所への操作を保持し、同じ値の競合は後の操作を拒否して画面に通知します。表示ページと倍率は各画面が保持します。
+
+サイドパネルはChromeウィンドウごとのSharedWorkerに接続します。タブが接続中なら開き直したパネルが同じ編集に復帰できます。最後の画面が通信ポートを閉じると、SharedWorkerは編集状態を解放します。新規タブへの招待には編集セッションのIDも付け、同じウィンドウで作り直された編集セッションを区別します。
+
 ## 入出力
 
 1. `src/pdf-source.js` がファイルの種類・サイズを検査し、専用Workerで構造を検証します。成功後に同梱PDF.jsでプレビューを開きます。

@@ -47,7 +47,7 @@ function setup(tool = 'pen', opacity = 0.75) {
       convertToPdfPoint: (x, y) => [x, y], convertToViewportPoint: (x, y) => [x, y] },
     document: { querySelectorAll: selector => selector === 'button, input, select, textarea' ? [...nodes.values()] : [],
       addEventListener(type, handler) { documentHandlers[type] = handler; } },
-    busy: false, selectedAnnotationId: null, selectedStrokeIds: new Set(), selectedTextIds: new Set(),
+    editorTab: false, busy: false, selectedAnnotationId: null, selectedStrokeIds: new Set(), selectedTextIds: new Set(),
     annotationFormatPreview: null, strokeFormatSession: null, textFormatSession: null, textEdit: null,
     textEnabled: false, penEnabled: false, activePreviewMenu: 'select', previewMenuOpen: false,
     stroke: null, annotationDrag: null, pageDrag: null,
