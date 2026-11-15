@@ -19,6 +19,7 @@ import { createToolHelp } from './tool-help.js';
 const $ = id => document.getElementById(id);
 const editorUrl = new URL(location.href);
 const editorTab = editorUrl.searchParams.get('mode') === 'editor';
+const collapsedEditorSidebars = new Set();
 const editorSessionTimeout = '編集データの受信期限が切れました。元の画面から新規タブを開き直してください。';
 const editorSessions = createDocumentJobBroker('pdf-side-studio-editor', editorSessionTimeout);
 window.addEventListener('pagehide', event => {
@@ -32,13 +33,25 @@ if (editorTab) {
   document.documentElement.classList.add('editor-tab');
   document.title = '全画面編集 | PDF Side Studio';
   $('open-fullscreen-preview').title = '全画面でプレビュー';
-  document.querySelector('.header-actions').prepend($('theme-mode'));
+  $('help').before($('theme-mode'));
   const sidebar = $('editor-sidebar');
-  $('editor-sidebar-actions').append($('document-actions'));
+  const history = document.querySelector('.preview-history');
+  for (const button of history.querySelectorAll('button')) button.replaceChildren(button.querySelector('svg'));
+  $('editor-file-actions').append($('document-actions'), history);
+  document.querySelector('.preview-topbar').remove();
   sidebar.append(document.querySelector('.preview-toolbar'), document.querySelector('.preview-menu-layer'));
   document.querySelector('.app-header').after(sidebar);
   document.querySelector('.app').append($('page-list-section'));
   for (const button of document.querySelectorAll('[data-close-preview-menu], #close-stamp')) button.remove();
+  for (const button of document.querySelectorAll('.editor-sidebar-toggle')) {
+    button.addEventListener('click', () => {
+      if (busy || stroke || annotationDrag || pageDrag) return;
+      const panel = button.getAttribute('aria-controls');
+      if (!collapsedEditorSidebars.delete(panel)) collapsedEditorSidebars.add(panel);
+      updateEditorSidebarLayout(model.pages.length > 0, model.past.length > 0 || model.future.length > 0);
+      if (panel === 'page-list-section') revealActiveThumbnail();
+    });
+  }
 } else $('open-editor-tab').hidden = false;
 
 for (const option of $('text-font').options) {
@@ -241,33 +254,17 @@ function refresh() {
   const hasHistory = model.past.length > 0 || model.future.length > 0;
   if (!hasPages) { previewMenuOpen = false; penEnabled = false; textEnabled = false; resetPreviewMenu(); }
   for (const name of previewMenus) $(`open-${name}`).hidden = !hasPages;
-  $('page-list-section').hidden = !hasPages;
   if (editorTab) {
-    const starting = !hasPages && !hasHistory;
-    const sidebar = $('editor-sidebar');
-    sidebar.hidden = starting;
+    updateEditorSidebarLayout(hasPages, hasHistory);
     document.querySelector('.preview-toolbar').hidden = !hasPages;
-    const destination = starting ? $('empty-state') : $('editor-sidebar-actions');
-    const upload = $('add-action');
-    if (upload.parentElement !== destination) {
-      $('add-files').querySelector('strong').textContent = starting ? 'ページを追加' : '追加';
-      if (starting) {
-        destination.querySelector('.empty-state-heading').after(upload);
-        destination.querySelector('.empty-state-details').append($('status'));
-      } else {
-        destination.prepend(upload);
-        destination.before($('status'));
-      }
-    }
-  }
-  $('workspace').hidden = !hasPages && !hasHistory;
+  } else $('page-list-section').hidden = !hasPages;
+  // The side panel still needs its preview row for history after the last page is removed.
+  $('workspace').hidden = !hasPages && (editorTab || !hasHistory);
   $('empty-state').hidden = hasPages;
   $('open-save').hidden = !hasPages;
   $('document-actions').hidden = !hasPages;
   if (!hasPages && $('save-dialog').open) $('save-dialog').close();
-  // Keep history controls available when deleting or undoing the last page.
-  document.querySelector('.preview-section').hidden = !hasPages && !hasHistory;
-  document.querySelector('.preview-heading').hidden = !hasPages;
+  if (!editorTab) document.querySelector('.preview-heading').hidden = !hasPages;
   $('preview-area').hidden = !hasPages;
   document.querySelector('.preview-footer').hidden = !hasPages;
   $('page-count').textContent = model.pages.length;
@@ -276,6 +273,41 @@ function refresh() {
   if (editorTab && hasPages) revealActiveThumbnail();
   updateControls();
   renderPreview();
+}
+
+function updateEditorSidebarLayout(hasPages, hasHistory) {
+  const starting = !hasPages && !hasHistory;
+  for (const [id, available] of [['editor-sidebar', !starting], ['page-list-section', hasPages]]) {
+    const button = $(`toggle-${id}`);
+    const expanded = available && !collapsedEditorSidebars.has(id);
+    $(id).hidden = !expanded;
+    button.hidden = !available;
+    button.setAttribute('aria-expanded', String(expanded));
+    button.title = `${button.dataset.sidebarLabel}を${expanded ? '閉じる' : '開く'}`;
+    button.setAttribute('aria-label', button.title);
+  }
+
+  const upload = $('add-action');
+  const statusNode = $('status');
+  const fileActions = $('editor-file-actions');
+  fileActions.hidden = starting;
+  if (starting) {
+    const emptyState = $('empty-state');
+    if (upload.parentElement !== emptyState) {
+      $('add-files').querySelector('strong').textContent = 'ページを追加';
+      emptyState.querySelector('.empty-state-heading').after(upload);
+      emptyState.querySelector('.empty-state-details').append(statusNode);
+    }
+    return;
+  }
+
+  if (upload.parentElement !== fileActions) {
+    $('add-files').querySelector('strong').textContent = '追加';
+    fileActions.prepend(upload);
+  }
+  const sidebar = $('editor-sidebar');
+  const statusDestination = sidebar.hidden ? fileActions.parentElement : sidebar;
+  if (statusNode.parentElement !== statusDestination) statusDestination.append(statusNode);
 }
 
 function refreshThumbnails() {
@@ -510,6 +542,7 @@ function navigatePage(offset) {
 
 function revealActiveThumbnail() {
   // Keep the active thumbnail visible without scrolling away from the preview.
+  if ($('page-list-section').hidden) return;
   const list = $('page-list');
   const card = list.querySelector('.page-card.active');
   if (!card) return;
@@ -555,7 +588,7 @@ async function renderPreview(anchor = null) {
   $('render-status').hidden = false;
   $('render-status').textContent = '読み込み中…';
   const source = sources.get(record.sourceId);
-  $('preview-title').textContent = source.name;
+  if (!editorTab) $('preview-title').textContent = source.name;
   $('page-position').textContent = `${model.pages.indexOf(record) + 1} / ${model.pages.length}`;
   try {
     const page = await source.preview.getPage(record.index + 1);
@@ -590,7 +623,9 @@ async function renderPreview(anchor = null) {
     viewport = nextViewport;
     paintTextPreview();
     refreshAnnotationHandles(); updateControls();
-    $('preview-size').textContent = `${Math.round(base.width)} × ${Math.round(base.height)} pt`;
+    const dimensions = `${Math.round(base.width)} × ${Math.round(base.height)} pt`;
+    if (editorTab) $('page-position').title = `${source.name} · ${dimensions}`;
+    else $('preview-size').textContent = dimensions;
     $('render-status').hidden = true;
   } catch (error) {
     if (version !== renderVersion || error.name === 'RenderingCancelledException') return;
@@ -1250,7 +1285,7 @@ function enableTextInsertion() {
   resetTextBackgroundSettings();
   textEnabled = true; penEnabled = false; selectedAnnotationId = null;
   resetPreviewMenu(); activePreviewMenu = 'text'; refreshAnnotationHandles(); updateControls();
-  status('紙面をクリックしてテキストを1つ配置してください。Escで配置を終了します。');
+  if (!editorTab) status('紙面をクリックしてテキストを1つ配置してください。Escで配置を終了します。');
 }
 $('open-text').addEventListener('click', () => togglePreviewMenu('text'));
 $('close-text').addEventListener('click', () => {
@@ -1415,7 +1450,7 @@ document.addEventListener('pointerdown', event => {
     return;
   }
   if (!event.target.closest('.text-settings, .pen-style-settings')) finishAnnotationFormatting();
-  if (event.target.closest('#confirm-text, #cancel-text, #close-text, #previous, #next, .preview-tool-button, .preview-zoom, [data-close-preview-menu]')) return;
+  if (event.target.closest('#confirm-text, #cancel-text, #close-text, #previous, #next, .preview-tool-button, .preview-zoom, .editor-sidebar-toggle, [data-close-preview-menu]')) return;
   if (!textEdit || event.target === textEdit.editor || textEdit.editor.contains?.(event.target) || event.target.closest('.text-settings')) return;
   if (!finishTextEdit()) { event.preventDefault(); event.stopImmediatePropagation(); }
 }, true);

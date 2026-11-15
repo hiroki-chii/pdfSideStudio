@@ -46,6 +46,7 @@ textarea{font:inherit;min-width:0;border:1px solid var(--line);border-radius:8px
 @media(max-width:380px){.preview-section .preview-toolbar .preview-tools .preview-tool-button{font-size:10px;padding-inline:1px}}
 .preview-tool-button span{white-space:nowrap}
 .preview-history{justify-content:flex-end}
+.preview-history svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;vertical-align:-2px}
 .preview-menu .preview-menu-heading{margin-bottom:8px;gap:8px}
 .preview-menu-heading button{flex-shrink:0;font-size:11px;min-height:32px}
 .preview-menu .tool-hint,.preview-menu .subtle{font-size:11px;line-height:1.6}

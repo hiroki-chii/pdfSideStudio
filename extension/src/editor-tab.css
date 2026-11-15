@@ -30,10 +30,30 @@
 
 .editor-tab .app-header {
   grid-area: header;
+  container: editor-header / inline-size;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 6px clamp(8px, 2vw, 24px);
   padding: 10px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
+
+.editor-tab .header-actions { flex-wrap: wrap; margin-inline-start: auto; }
+.editor-tab .app-header > #status { flex-basis: 100%; min-height: 0; padding: 0; }
+
+.editor-sidebar-toggle {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: var(--muted);
+}
+.editor-sidebar-toggle svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.editor-sidebar-toggle .sidebar-indicator { stroke: none; }
+.editor-sidebar-toggle[aria-expanded="true"] { color: var(--purple); }
+.editor-sidebar-toggle[aria-expanded="true"] .sidebar-indicator { fill: currentColor; }
 
 .editor-tab main {
   grid-area: main;
@@ -60,27 +80,40 @@
 .add-source-actions { display: grid; gap: 8px; margin-top: 12px; }
 .add-source-actions button { text-align: left; }
 
-.editor-sidebar-actions {
+.editor-file-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
   gap: 8px;
-  margin-bottom: 12px;
 }
-.editor-sidebar-actions .add-action { margin-inline-end: auto; }
+.editor-file-actions button { min-height: 38px; }
 
-.editor-sidebar .document-actions { position: static; }
-.editor-sidebar-actions .save-launcher {
+.editor-file-actions .document-actions { position: static; gap: inherit; }
+.editor-file-actions .save-launcher {
   border-color: var(--line);
   border-radius: 9px;
   background: var(--surface);
   color: var(--ink);
   box-shadow: none;
 }
-.editor-sidebar-actions .save-launcher:hover:not(:disabled) {
+.editor-file-actions .save-launcher:hover:not(:disabled) {
   border-color: var(--border-accent);
   background: var(--surface-hover);
+}
+
+.editor-file-actions .document-actions:not([hidden]) + .preview-history { margin-inline-start: 8px; }
+.editor-file-actions .preview-history button { display: grid; place-items: center; width: 38px; padding: 0; }
+.editor-file-actions .preview-history svg { width: 18px; height: 18px; }
+
+@container editor-header (max-width: 200px) {
+  .editor-file-actions { gap: 4px; }
+  .editor-file-actions button { min-height: 34px; padding: 5px; }
+  .editor-file-actions .print-launcher { width: 30px; height: 34px; }
+  .editor-file-actions .upload-button strong { font-size: 12px; }
+  .editor-file-actions .upload-icon,
+  .editor-file-actions .save-launcher svg { display: none; }
+  .editor-file-actions .preview-history { gap: 4px; }
+  .editor-file-actions .preview-history button { width: 34px; }
 }
 
 .editor-sidebar .preview-toolbar { padding: 0; border: 0; }
@@ -187,7 +220,7 @@
 
 .editor-tab .preview-section {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   height: 100%;
   border: 0;
   border-radius: 0;
@@ -202,17 +235,15 @@
     --pages-width: clamp(66px, 16vw, 92px);
   }
   .editor-tab .app-header {
-    flex-wrap: wrap;
     gap: 6px;
     padding-inline: 8px;
   }
   .editor-tab .brand { gap: 6px; }
   .editor-tab .brand-mark { flex-shrink: 0; }
+  .editor-tab .header-actions { gap: 3px; }
+  .editor-tab .header-actions .theme-toggle { width: 28px; }
+  .editor-tab .header-actions .editor-sidebar-toggle { width: 26px; }
   .editor-sidebar { padding: 8px; }
-  .editor-sidebar-actions,
-  .editor-sidebar .document-actions { gap: 4px; }
-  .editor-sidebar .print-launcher { width: 32px; height: 34px; padding: 5px; }
-  .editor-sidebar .save-launcher { min-height: 34px; padding: 6px 8px; }
   .editor-sidebar .preview-tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .editor-sidebar .preview-menu { padding: 8px; }
   .editor-sidebar .menu-heading-actions { flex-shrink: 1; flex-wrap: wrap; justify-content: flex-start; margin-left: 0; }
@@ -226,9 +257,6 @@
   .editor-tab .page-button canvas { max-width: 100%; }
   .editor-tab .preview-section .preview-area { padding: 0 0 78px; }
   .editor-tab .preview-area .preview-nav { bottom: 78px; }
-  .editor-tab .preview-topbar { flex-wrap: wrap; }
-  .editor-tab .preview-history { flex-wrap: wrap; max-width: 100%; }
-  .editor-tab .preview-history button { padding-inline: 4px; }
   .editor-tab .preview-zoom { left: 4px; max-width: calc(100% - 8px); flex-wrap: wrap; gap: 2px; }
   .editor-tab .preview-zoom button { padding-inline: 3px; }
   .editor-tab .preview-zoom output { min-width: 30px; }
