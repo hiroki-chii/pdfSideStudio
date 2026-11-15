@@ -7,6 +7,7 @@ import { PDFDocument } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { EditorModel } from '../src/model.js';
 import { paintOverlay, strokeLayout, moveStroke, scaleStrokes, buildPdf, imagePlacement } from '../src/pdf.js';
+import { styledRuns, textStyle, textBackground } from '../src/text-format.js';
 
 const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
 const slice = (start, end) => app.slice(app.indexOf(start), app.indexOf(end));
@@ -43,6 +44,7 @@ function setup(tool = 'pen', opacity = 0.75) {
   model.commit([{ id: 'page', strokes: [original, other, text], watermark },
     { id: 'other-page', strokes: [other] }]);
   const context = vm.createContext({ $, model, canvas, paintOverlay, strokeLayout, moveStroke, scaleStrokes,
+    styledRuns, textStyle, textBackground,
     viewport: { width: 200, height: 200, scale: 1,
       convertToPdfPoint: (x, y) => [x, y], convertToViewportPoint: (x, y) => [x, y] },
     document: { querySelectorAll: selector => selector === 'button, input, select, textarea' ? [...nodes.values()] : [],
@@ -51,7 +53,7 @@ function setup(tool = 'pen', opacity = 0.75) {
     annotationFormatPreview: null, strokeFormatSession: null, textFormatSession: null, textEdit: null,
     textEnabled: false, penEnabled: false, activePreviewMenu: 'select', previewMenuOpen: false,
     stroke: null, annotationDrag: null, pageDrag: null,
-    previewMenus: ['rotation', 'pen', 'watermark'], previewZoom: 1, minPreviewZoom: 0.5, maxPreviewZoom: 4,
+    previewMenus: ['rotation', 'pen', 'stamp', 'watermark'], previewZoom: 1, minPreviewZoom: 0.5, maxPreviewZoom: 4,
     toolDescriptions: { 'open-text': 'テキスト', 'open-pen': 'ペン' },
     resetPreviewMenu() { context.activePreviewMenu = 'select'; },
     refreshThumbnails() {}, status() {},
@@ -94,6 +96,33 @@ function installHandles({ context, $ }) {
 
 const pointer = (x, y, extra = {}) => ({ button: 0, isPrimary: true, pointerId: 1,
   clientX: x, clientY: y, preventDefault() {}, ...extra });
+
+test('the tab editor opens and highlights the selected object’s settings', () => {
+  const { context, $, model, original, text } = setup('rectangle');
+  vm.runInContext(slice('function enableTextInsertion()', "\n$('open-text').addEventListener"), context);
+  const stamp = { ...text, id: 'stamp', text: '1', stampPattern: 'circle' };
+  model.update(new Set([model.activeId]), page => ({ ...page, strokes: [...page.strokes, stamp] }));
+  const watermark = context.pageAnnotations().find(item => item.tool === 'watermark');
+  const menus = ['select', 'pen', 'text', 'stamp', 'watermark', 'rotation'];
+  context.editorTab = true;
+  for (const [annotation, menu] of [[original, 'pen'], [text, 'text'], [stamp, 'text'], [watermark, 'watermark']]) {
+    context.selectAnnotation(annotation);
+    for (const name of menus) {
+      assert.equal($(`panel-${name}`).hidden, name !== menu);
+      assert.equal($(`open-${name}`).getAttribute('aria-pressed'), String(name === menu));
+    }
+    context.togglePreviewMenu(menu);
+    context.selectAnnotation(annotation, { preserve: true, openMenu: false });
+    assert.equal($(`panel-${menu}`).hidden, true);
+    context.togglePreviewMenu(menu);
+    assert.equal($(`panel-${menu}`).hidden, false);
+    assert.equal(context.selectedAnnotationId, annotation.id);
+  }
+  context.selectAnnotation(original);
+  context.selectAnnotation(original, { toggle: true });
+  assert.equal(context.selectedAnnotationId, null);
+  assert.ok(menus.every(name => $(`panel-${name}`).hidden));
+});
 
 test('modifier clicks toggle stroke selection, retain all handles, and leave history and Redo intact', () => {
   const env = setup(), { context, model, other, original } = env;

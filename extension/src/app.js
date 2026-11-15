@@ -157,14 +157,16 @@ function updateControls() {
   $('save').disabled = busy || !model.pages.length;
   $('open-save').disabled = busy || !model.pages.length;
   $('print').disabled = busy || !model.pages.length;
-  if (!selectedAnnotation()) selectedAnnotationId = null;
+  const selected = selectedAnnotation();
+  if (!selected) selectedAnnotationId = null;
   const textSelected = !!(selectedText() || textEdit);
   const strokeSelected = !!selectedStroke();
-  const visibleMenu = !previewMenuOpen ? null : selectedStroke() ? 'pen'
-    : textEnabled || selectedText() || textEdit ? 'text'
-      : selectedAnnotation()?.tool === 'watermark' ? 'watermark' : activePreviewMenu;
+  const selectedMenu = strokeSelected ? 'pen' : textEnabled || textSelected ? 'text'
+    : selected?.tool === 'watermark' ? 'watermark' : activePreviewMenu;
+  const visibleMenu = previewMenuOpen ? selectedMenu : null;
+  const pressedMenu = !editorTab && selected?.tool === 'watermark' ? activePreviewMenu : selectedMenu;
   $('open-select').disabled = busy || !model.active;
-  $('open-select').setAttribute('aria-pressed', String(!textSelected && !strokeSelected && activePreviewMenu === 'select'));
+  $('open-select').setAttribute('aria-pressed', String(pressedMenu === 'select'));
   $('open-select').setAttribute('aria-controls', 'panel-select');
   $('open-select').setAttribute('aria-expanded', String(visibleMenu === 'select' && !!model.active));
   $('panel-select').hidden = !model.active || visibleMenu !== 'select';
@@ -200,7 +202,7 @@ function updateControls() {
     : '外側クリック・Ctrl+Enter・Escで入力を確定。「入力を取り消す」で変更を取り消します。書式は「テキスト」ツールから設定できます。';
   $('open-text').hidden = !model.pages.length;
   $('open-text').disabled = busy || !model.active || strokeSelected;
-  $('open-text').setAttribute('aria-pressed', String(textSelected || activePreviewMenu === 'text'));
+  $('open-text').setAttribute('aria-pressed', String(pressedMenu === 'text'));
   $('open-text').setAttribute('aria-expanded', String(!$('panel-text').hidden));
   $('open-text').setAttribute('aria-label', textSelected ? 'テキストの書式設定' : 'テキストボックスを配置');
   $('open-text').title = textSelected ? '選択したテキストの書式設定を開く・閉じる' : toolDescriptions['open-text'];
@@ -231,7 +233,7 @@ function updateControls() {
     $(`panel-${name}`).hidden = !open;
     $(`open-${name}`).disabled = busy || !model.pages.length;
     $(`open-${name}`).setAttribute('aria-expanded', String(open));
-    $(`open-${name}`).setAttribute('aria-pressed', String(name === 'pen' ? strokeSelected || activePreviewMenu === name : activePreviewMenu === name));
+    $(`open-${name}`).setAttribute('aria-pressed', String(pressedMenu === name));
   }
   for (const name of ['select', ...previewMenus]) {
     $(`open-${name}`).disabled ||= textSelected;
@@ -239,7 +241,6 @@ function updateControls() {
   }
   $('open-pen').setAttribute('aria-label', strokeSelected ? '描画の書式設定' : 'ペン');
   $('open-pen').title = strokeSelected ? '選択した描画の書式設定を開く・閉じる' : toolDescriptions['open-pen'];
-  const selected = selectedAnnotation();
   $('watermark-menu-title').textContent = selected?.tool === 'watermark' ? '選択した透かし' : '透かしの設定';
   $('close-watermark').textContent = selected?.tool === 'watermark' ? '選択を解除' : '選択に戻る';
   $('ink-canvas').classList.toggle('drawing', penEnabled && !busy);
@@ -249,7 +250,9 @@ function updateControls() {
 }
 
 function refresh() {
-  if (selectedAnnotation()) selectAnnotation(selectedAnnotation(), { preserve: true });
+  const annotation = selectedAnnotation();
+  if (annotation) selectAnnotation(annotation, { preserve: true, openMenu: false });
+  else if (editorTab && selectedAnnotationId && !textEdit) previewMenuOpen = false;
   const hasPages = model.pages.length > 0;
   const hasHistory = model.past.length > 0 || model.future.length > 0;
   if (!hasPages) { previewMenuOpen = false; penEnabled = false; textEnabled = false; resetPreviewMenu(); }
@@ -521,6 +524,7 @@ function activate(id) {
   activePreviewMenu = menu;
   penEnabled = menu === 'pen'; textEnabled = menu === 'text';
   if (textEnabled && !wasInsertingText) resetTextBackgroundSettings();
+  if (editorTab && selectedAnnotationId) previewMenuOpen = false;
   selectedAnnotationId = null;
   selectedTextIds.clear(); selectedStrokeIds.clear();
   model.activeId = id;
@@ -1106,7 +1110,9 @@ function togglePreviewMenu(name) {
     previewMenuOpen = false; updateControls(); return;
   }
   if (name === 'select') enableSelection(true);
-  else if (name === 'pen' && selectedStroke()) { previewMenuOpen = true; updateControls(); }
+  else if ((name === 'pen' && selectedStroke()) || (editorTab && name === 'watermark' && selectedAnnotation()?.tool === name)) {
+    previewMenuOpen = true; updateControls();
+  }
   else if (name === 'text') enableTextInsertion();
   else openPreviewMenu(name);
 }
@@ -1177,7 +1183,7 @@ function moveAnnotation(annotation, dx, dy) {
     ? moveText($('ink-canvas').getContext('2d'), annotation, viewport, dx, dy)
     : moveStroke(annotation, viewport, dx, dy);
 }
-function selectAnnotation(annotation, { toggle = false, preserve = false } = {}) {
+function selectAnnotation(annotation, { toggle = false, preserve = false, openMenu = true } = {}) {
   const isStroke = !['text', 'watermark'].includes(annotation.tool);
   const isText = annotation.tool === 'text';
   if (toggle && (isStroke || isText)) {
@@ -1188,7 +1194,10 @@ function selectAnnotation(annotation, { toggle = false, preserve = false } = {})
     ids.forEach(id => (isText ? selectedTextIds : selectedStrokeIds).add(id));
     selectedAnnotationId = ids.has(annotation.id) ? annotation.id : [...ids].at(-1) ?? null;
     annotation = model.active.strokes.find(item => item.id === selectedAnnotationId);
-    if (!annotation) { refreshAnnotationHandles(); updateControls(); return; }
+    if (!annotation) {
+      if (editorTab) previewMenuOpen = false;
+      refreshAnnotationHandles(); updateControls(); return;
+    }
   } else {
     if (!preserve || !isStroke) selectedStrokeIds.clear();
     if (!preserve || !isText) selectedTextIds.clear();
@@ -1198,8 +1207,9 @@ function selectAnnotation(annotation, { toggle = false, preserve = false } = {})
   }
   resetPreviewMenu();
   penEnabled = false; textEnabled = false;
+  if (editorTab && openMenu) previewMenuOpen = true;
   if (isStroke) {
-    previewMenuOpen = false;
+    if (!editorTab) previewMenuOpen = false;
     syncPenControls(annotation);
   }
   if (annotation.tool === 'watermark') {
@@ -1366,7 +1376,7 @@ function readTextDraft() {
 
 function startTextEdit(annotation, isNew = false) {
   if (!viewport || !finishTextEdit()) return;
-  previewMenuOpen = false;
+  if (!editorTab) previewMenuOpen = false;
   selectAnnotation(annotation); penEnabled = false;
   if (isNew) activePreviewMenu = 'text';
   const editor = createTextEditor(annotation);
@@ -1408,7 +1418,7 @@ function finishTextEdit(cancel = false) {
   if (!cancel && !updateTextDraft()) { textEdit.editor.focus({ preventScroll: true }); return false; }
   const { pageId, original, draft, editor } = textEdit;
   textEdit = null; editor.remove();
-  textEnabled = false; previewMenuOpen = false; resetPreviewMenu();
+  textEnabled = false; resetPreviewMenu();
   if (!cancel) {
     const empty = !draft.text.trim();
     const changed = original ? JSON.stringify(original) !== JSON.stringify(draft) || empty : !empty;
@@ -1423,6 +1433,7 @@ function finishTextEdit(cancel = false) {
     }
     selectedAnnotationId = empty ? null : draft.id;
   } else selectedAnnotationId = original?.id ?? null;
+  previewMenuOpen = editorTab && !!selectedAnnotationId && previewMenuOpen;
   paintTextPreview(); refreshAnnotationHandles(); updateControls();
   return true;
 }
@@ -1785,6 +1796,7 @@ function deleteSelectedAnnotation() {
   model.update(new Set([model.activeId]), p => annotation.tool === 'watermark' ? { ...p, watermark: null }
     : { ...p, strokes: p.strokes.filter(item => !ids.has(item.id)) });
   resetPreviewMenu();
+  if (editorTab) previewMenuOpen = false;
   selectedAnnotationId = null; selectedStrokeIds.clear(); selectedTextIds.clear(); refresh(); status(`選択した${annotation.tool === 'text' ? 'テキスト' : annotation.tool === 'watermark' ? '透かし' : '描画'}${ids.size > 1 ? `（${ids.size}件）` : ''}を削除しました。「元に戻す」で復元できます。`);
 }
 on('delete-text', deleteSelectedAnnotation);
@@ -1895,7 +1907,7 @@ function refreshAnnotationHandles() {
       const annotation = currentText();
       if (!annotation) return;
       event.preventDefault();
-      if (isText) previewMenuOpen = false;
+      if (isText && !editorTab) previewMenuOpen = false;
       const toggle = (isStroke || isText) && (event.shiftKey || event.ctrlKey || event.metaKey);
       const fromTail = !!event.target?.closest('.text-tail-hit-area');
       const selectOnly = annotation.boxShape === 'bubble' && selectedAnnotationId !== annotation.id;
@@ -1965,7 +1977,7 @@ function finishAnnotationDrag(event) {
   }
   // Preserve the DOM target for the browser's second click/dblclick event.
   positionAnnotationHandle(button, current); updateControls();
-  // Clicking edits the content; formatting opens only from the text toolbar icon.
+  // A stationary click can enter text editing after the selection is set.
   if (!moved && !selectOnly && original.tool === 'text' && selectedTexts().length === 1) startTextEdit(current);
 }
 function cancelAnnotationDrag(event) {
