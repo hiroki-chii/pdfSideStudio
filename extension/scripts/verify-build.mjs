@@ -34,6 +34,7 @@ const manifest = JSON.parse(manifestBytes);
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url)));
 assert.equal(manifest.version, packageJson.version);
 assert.deepEqual(manifest.permissions, ['sidePanel', 'activeTab']);
+assert.deepEqual(manifest.optional_permissions, ['desktopCapture']);
 assert.equal(manifest.host_permissions, undefined);
 assert.deepEqual(manifest.optional_host_permissions, ['<all_urls>']);
 assert.match(manifest.content_security_policy.extension_pages, /connect-src 'self'/);

@@ -5,6 +5,7 @@
   "description": "サイドパネルでPDFを結合・分割・回転。ペンで書き込み、透かしを追加。すべて端末内で処理します。",
   "minimum_chrome_version": "120",
   "permissions": ["sidePanel", "activeTab"],
+  "optional_permissions": ["desktopCapture"],
   "optional_host_permissions": ["<all_urls>"],
   "action": { "default_title": "PDF Side Studio を開く" },
   "background": { "service_worker": "background.js" },

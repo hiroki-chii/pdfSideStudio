@@ -31,10 +31,6 @@ window.addEventListener('pagehide', event => {
 if (editorTab) {
   document.documentElement.classList.add('editor-tab');
   document.title = '全画面編集 | PDF Side Studio';
-  const addButton = $('add-files');
-  addButton.setAttribute('aria-label', 'PDF・画像を追加');
-  addButton.title = 'PDF・画像を追加（画面内のどこにでもドロップできます）';
-  $('status').textContent = '';
   $('open-fullscreen-preview').title = '全画面でプレビュー';
   document.querySelector('.header-actions').prepend($('theme-mode'));
   const sidebar = $('editor-sidebar');
@@ -252,9 +248,9 @@ function refresh() {
     sidebar.hidden = starting;
     document.querySelector('.preview-toolbar').hidden = !hasPages;
     const destination = starting ? $('empty-state') : $('editor-sidebar-actions');
-    const upload = $('drop-zone');
+    const upload = $('add-action');
     if (upload.parentElement !== destination) {
-      $('add-files').querySelector('strong').textContent = starting ? 'PDF・画像を追加' : '追加';
+      $('add-files').querySelector('strong').textContent = starting ? 'ページを追加' : '追加';
       if (starting) {
         destination.querySelector('.empty-state-heading').after(upload);
         destination.querySelector('.empty-state-details').append($('status'));
@@ -627,68 +623,104 @@ async function addFiles(files) {
   status(errors.length ? `${added.length}ページ追加。${errors.join(' / ')}` : `${added.length}ページを追加しました。追加順に結合して保存できます。`, errors.length ? 'error' : 'success');
 }
 
-const captureSiteAccess = { origins: ['<all_urls>'] };
-let captureAccessGranted = false;
+const capturedTabFilename = 'タブのキャプチャ.png';
 
-function updateCaptureAccess(granted) {
-  captureAccessGranted = granted;
-  $('capture-tab').textContent = granted ? '表示中のタブを取り込む' : 'サイトへのアクセスを許可して取り込む';
-  $('capture-tab').hidden = false;
-  if (granted) $('capture-tab-once').hidden = true;
-}
-
-function refreshCaptureAccess() {
-  return chrome.permissions.contains(captureSiteAccess).then(updateCaptureAccess).catch(console.error);
-}
-
-async function verifyCaptureTab(tab) {
+async function verifyActiveTab(tab) {
   const [active] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
-  if (active?.id !== tab.id || (tab.url && active.url && active.url !== tab.url)) {
-    throw new Error('取り込み中に表示ページが変わりました。もう一度お試しください。');
+  if (active?.id !== tab.id || (tab.url && active.url !== tab.url)) {
+    throw new Error('取り込み中に表示中のタブが変わりました。もう一度お試しください。');
   }
+  return active;
 }
 
-async function captureVisibleTab(tab, justGranted) {
+async function captureCurrentTab() {
+  let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id == null) throw new Error('取り込めるタブが見つかりません。');
+  let dataUrl;
+  const temporaryAccessHint = '対象タブでツールバーの PDF Side Studio アイコンを押してから、もう一度お試しください。';
   for (let attempt = 0; attempt < 2; attempt++) {
-    await verifyCaptureTab(tab);
+    tab = await verifyActiveTab(tab);
+    status('表示中のタブを取り込んでいます…');
     try {
-      return await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+      dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+      break;
     } catch (error) {
-      const needsAccess = /activeTab|<all_urls>/i.test(error.message);
-      if (attempt === 0 && ((justGranted && needsAccess) || /image readback failed|view is invisible/i.test(error.message))) {
-        // Chrome may still be restoring access or the tab surface after the permission dialog.
-        await new Promise(resolve => setTimeout(resolve, 350));
-        continue;
+      if (/activeTab|<all_urls>/i.test(error.message)) {
+        if (attempt > 0) throw new Error(temporaryAccessHint);
+        status('Chrome の確認画面で、タブを取り込むためのサイトアクセスを許可してください。');
+        if (!await chrome.permissions.request({ origins: ['<all_urls>'] })) {
+          status(temporaryAccessHint);
+          return;
+        }
+      } else if (attempt > 0 || !/image readback failed|view is invisible/i.test(error.message)) {
+        throw new Error('表示中のタブを取り込めませんでした。もう一度お試しください。', { cause: error });
       }
-      if (needsAccess) {
-        await refreshCaptureAccess();
-        throw new Error('対象タブでツールバーの PDF Side Studio アイコンを押してから、もう一度お試しください。');
-      }
-      throw new Error('タブの表示範囲を取り込めませんでした。対象タブを表示して、もう一度お試しください。');
+      // The tab may still be repainting after the panel or permission dialog opens.
+      await new Promise(resolve => setTimeout(resolve, 350));
     }
   }
+  await verifyActiveTab(tab);
+  const prefix = 'data:image/png;base64,';
+  if (!dataUrl?.startsWith(prefix)) throw new Error('タブの画像を取得できませんでした。');
+  const bytes = Uint8Array.from(globalThis.atob(dataUrl.slice(prefix.length)), char => char.charCodeAt(0));
+  await addFiles([new globalThis.File([bytes], capturedTabFilename, { type: 'image/png' })]);
 }
 
-async function captureTab(requestAccess) {
-  status(requestAccess ? 'Chrome の確認画面でサイトへのアクセスを許可してください。' : '表示中のタブを取り込んでいます…');
-  const [[tab], granted] = await Promise.all([
-    chrome.tabs.query({ active: true, currentWindow: true }),
-    requestAccess ? chrome.permissions.request(captureSiteAccess) : true,
-  ]);
-  if (!granted) {
-    $('capture-tab-once').hidden = false;
-    status('一時アクセスで取り込むには、対象タブでツールバーの PDF Side Studio アイコンを押し、「このタブだけ取り込む」を選んでください。');
+async function captureSelectedTab() {
+  if (!await chrome.permissions.request({ permissions: ['desktopCapture'] })) {
+    status('タブを取り込むには、Chrome の確認画面で画面取り込みを許可してください。');
     return;
   }
-  if (requestAccess) updateCaptureAccess(true);
-  if (!tab) throw new Error('取り込めるタブが見つかりません。');
-  status('表示中のタブを取り込んでいます…');
-  const dataUrl = await captureVisibleTab(tab, requestAccess);
-  await verifyCaptureTab(tab);
-  const pngPrefix = 'data:image/png;base64,';
-  if (!dataUrl.startsWith(pngPrefix)) throw new Error('タブの画像を取得できませんでした。');
-  const bytes = Uint8Array.from(globalThis.atob(dataUrl.slice(pngPrefix.length)), char => char.charCodeAt(0));
-  await addFiles([new globalThis.File([bytes], 'タブのキャプチャ.png', { type: 'image/png' })]);
+
+  const originalTab = editorTab ? await chrome.tabs.getCurrent()
+    : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+  status('取り込むタブを選んでください。');
+  const streamId = await new Promise((resolve, reject) => {
+    chrome.desktopCapture.chooseDesktopMedia(['tab'], null, { selfBrowserSurface: 'exclude' }, id => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve(id);
+    });
+  });
+  if (!streamId) { status(''); return; }
+
+  status('選んだタブを取り込んでいます…');
+  const canvas = document.createElement('canvas');
+  try {
+    const stream = await globalThis.navigator.mediaDevices.getUserMedia({
+      audio: false,
+      // Request refresh frames even when the selected tab's contents stay still.
+      video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: streamId, minFrameRate: 5 } },
+    });
+    const [track] = stream.getVideoTracks();
+    let capture;
+    try {
+      capture = new globalThis.ImageCapture(track);
+      const frame = await capture.grabFrame();
+      try {
+        canvas.width = frame.width;
+        canvas.height = frame.height;
+        canvas.getContext('2d').drawImage(frame, 0, 0);
+      } finally { frame.close(); }
+    } finally {
+      // Retain the ImageCapture instance until the pending grabFrame finishes.
+      (capture?.track ?? track)?.stop();
+    }
+  } catch (error) {
+    throw new Error('選んだタブの表示範囲を取り込めませんでした。もう一度お試しください。', { cause: error });
+  } finally {
+    // Chrome activates the selected tab, so restore the originating tab after capture.
+    try {
+      if (originalTab?.id != null) {
+        const tab = await chrome.tabs.update(originalTab.id, { active: true });
+        await chrome.windows.update(tab.windowId, { focused: true });
+      }
+    } catch (error) { console.error(error); }
+  }
+
+  const image = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+  if (!image) throw new Error('タブの画像を取得できませんでした。');
+  await addFiles([new globalThis.File([image], capturedTabFilename, { type: 'image/png' })]);
 }
 
 function rotate(angle) {
@@ -906,20 +938,35 @@ async function splitPdf() {
 
 function on(id, action) { $(id).addEventListener('click', () => run(action)); }
 on('open-editor-tab', openEditorTab);
-if (globalThis.chrome?.tabs?.captureVisibleTab && !editorTab) {
-  chrome.permissions.onAdded.addListener(refreshCaptureAccess);
-  chrome.permissions.onRemoved.addListener(refreshCaptureAccess);
-  refreshCaptureAccess();
-  on('capture-tab', () => captureTab(!captureAccessGranted));
-  on('capture-tab-once', () => captureTab(false));
+const canCaptureCurrentTab = !editorTab && globalThis.chrome?.tabs?.captureVisibleTab;
+const canCaptureSelectedTab = globalThis.chrome?.permissions?.request && globalThis.navigator?.mediaDevices?.getUserMedia && globalThis.ImageCapture;
+if (canCaptureCurrentTab || canCaptureSelectedTab) {
+  const dialog = $('add-source-dialog');
+  const addButton = $('add-files');
+  addButton.setAttribute('aria-haspopup', 'dialog');
+  addButton.setAttribute('aria-controls', dialog.id);
+  addButton.addEventListener('click', () => dialog.showModal());
+  $('browse-files').addEventListener('click', () => {
+    dialog.close();
+    $('file-input').click();
+  });
+  const startCapture = action => () => {
+    dialog.close();
+    return run(action);
+  };
+  $('capture-current-tab').hidden = !canCaptureCurrentTab;
+  $('capture-current-tab').addEventListener('click', startCapture(captureCurrentTab));
+  $('capture-selected-tab').hidden = !canCaptureSelectedTab;
+  $('capture-selected-tab').addEventListener('click', startCapture(captureSelectedTab));
+} else {
+  $('add-files').addEventListener('click', () => $('file-input').click());
 }
-$('add-files').addEventListener('click', () => $('file-input').click());
 $('file-input').addEventListener('change', event => {
   const files = [...event.target.files]; event.target.value = '';
   if (files.length) run(() => addFiles(files));
 });
 // Prevent dropped files from navigating the extension page.
-const dropHighlight = editorTab ? document.documentElement : $('drop-zone');
+const dropHighlight = document.documentElement;
 const clearDropHighlight = () => dropHighlight.classList.remove('dragging');
 document.addEventListener('dragover', event => {
   event.preventDefault();
@@ -932,7 +979,11 @@ document.addEventListener('drop', event => {
   event.preventDefault();
   clearDropHighlight();
   if (draggedPageId) { finishPageDrag(); return; }
-  const files = [...event.dataTransfer.files]; if (files.length) run(() => addFiles(files));
+  const files = [...event.dataTransfer.files];
+  if (files.length) {
+    $('add-source-dialog').close();
+    run(() => addFiles(files));
+  }
 }, true);
 on('rotate-left', () => rotate(-90)); on('rotate-right', () => rotate(90));
 $('rotation-scope').addEventListener('change', updateControls);
@@ -2020,7 +2071,7 @@ createFullscreenPreview({ getPreview(index = model.pages.indexOf(model.active)) 
     label: `${sources.get(record.sourceId).name} · ${index + 1} / ${model.pages.length}` };
 } });
 document.addEventListener('keydown', event => {
-  if ($('fullscreen-preview').open) return;
+  if ($('fullscreen-preview').open || $('add-source-dialog').open) return;
   if (handleTextShortcut(event)) return;
   if (handlePenShortcut(event)) return;
   if (handlePageToolShortcut(event)) return;
