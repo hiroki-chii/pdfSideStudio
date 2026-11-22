@@ -245,7 +245,7 @@
   .editor-tab .page-list-section { padding: 6px 4px 0; }
   .editor-tab #page-list-title { font-size: 11px; }
   .editor-tab .page-list-section .count { margin-left: 2px; padding-inline: 3px; }
-  .editor-tab .page-card-actions { inset-inline: 0; gap: 2px; }
+  .editor-tab .page-card-actions { inset-inline: 0; gap: 2px; grid-template-columns: repeat(2, 19px); }
   .editor-tab .page-card-actions .page-card-action { width: 19px; height: 24px; }
   .editor-tab .page-button canvas { max-width: 100%; }
   .editor-tab .preview-section .preview-area { padding: 0 0 78px; }

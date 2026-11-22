@@ -1,6 +1,6 @@
 # pdfSideStudio
 
-ChromeのサイドパネルでPDFの結合・分割・回転、書き込み、テキストや透かしの追加ができる拡張機能「PDF Side Studio」です。PDFは端末内で処理します。
+Chrome拡張機能「PDF Side Studio」です。サイドパネルでPDFの結合・並べ替え・コピー・削除・回転ができ、「フル機能」から新規タブを開くと分割・ペン・テキスト・透かしなどのすべての編集機能を使えます。PDFは端末内で処理します。
 
 - [アプリのソースコード・使い方](extension/README.md)
 - [Chrome Web Store掲載用スクリーンショット](extension/docs/chrome-web-store/README.md)
@@ -9,7 +9,7 @@ ChromeのサイドパネルでPDFの結合・分割・回転、書き込み、�
 
 ## ビルド
 
-Node.js 22.12以降（24推奨）を使用してください。
+Node.js 22.13以降の22系、または24以降（24推奨）を使用してください。
 
 ```sh
 cd extension

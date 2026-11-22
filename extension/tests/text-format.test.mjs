@@ -23,7 +23,7 @@ const script = [
   slice('function moveSelectedAnnotation(', '\nfunction refreshAnnotationHandles()'),
 ].join('\n');
 
-test('a text click edits without a menu, while a drag only moves the text', () => {
+test('a text click opens editing settings in the tab, while a drag only moves the text', () => {
   for (const moved of [false, true]) {
     const { context, original } = setup();
     Object.assign(context, { annotationDrag: { pageId: 'page', original, current: original,
@@ -31,7 +31,7 @@ test('a text click edits without a menu, while a drag only moves the text', () =
       previewMenuOpen: false, updateAnnotationDrag() {}, positionAnnotationHandle() {} });
     vm.runInContext(slice('function finishAnnotationDrag(', '\nfunction cancelAnnotationDrag('), context);
     context.finishAnnotationDrag({ pointerId: 1 });
-    assert.equal(context.previewMenuOpen, false);
+    assert.equal(context.previewMenuOpen, !moved);
     assert.equal(!!context.textEdit, !moved);
     if (!moved) assert.equal(context.textEdit.editor.value, original.text);
     assert.equal(context.annotationDrag, null);
@@ -68,7 +68,7 @@ function setup() {
       editor.setBackground = () => { editor.backgroundUpdated = true; };
       return editor;
     },
-    editorTab: false, busy: false, selectedAnnotationId: 'text', selectedStrokeIds: new Set(), selectedTextIds: new Set(),
+    editorTab: true, busy: false, selectedAnnotationId: 'text', selectedStrokeIds: new Set(), selectedTextIds: new Set(),
     annotationFormatPreview: null, strokeFormatSession: null, textFormatSession: null, textEdit: null,
     textEnabled: false, textInsertionColor: '#222222', penEnabled: false, activePreviewMenu: 'text',
     previewMenuOpen: false, stroke: null, annotationDrag: null, pageDrag: null,
@@ -82,7 +82,7 @@ function setup() {
     status(message, kind) { if (kind === 'error') errors.push(message); },
   });
   vm.runInContext(script, context);
-  context.selectAnnotation(original);
+  context.selectAnnotation(original, { openMenu: false });
   return { context, $, model, original, errors };
 }
 
@@ -151,6 +151,7 @@ test('the text icon opens formatting without losing selection or an active draft
   context.togglePreviewMenu('text');
   assert.equal(context.previewMenuOpen, false);
   context.startTextEdit(original);
+  context.togglePreviewMenu('text'); // Close the tab's automatically opened settings first.
   context.textEdit.editor.value = '入力途中'; context.updateTextDraft();
   const editing = context.textEdit;
   const history = model.past.length;
@@ -865,10 +866,11 @@ test('text selection and editing disable other toolbar tools, and deselection re
   assert.equal($('panel-text').hidden, true);
   context.startTextEdit(original); assertTools(true);
   context.togglePreviewMenu('text'); assertTools(true);
+  context.togglePreviewMenu('text'); assertTools(true);
   assert.equal($('panel-text').hidden, false);
   assert.equal(context.textEdit.original, original);
   context.finishTextEdit(); assertTools(true);
-  assert.equal($('panel-text').hidden, true);
+  assert.equal($('panel-text').hidden, false);
   context.selectedAnnotationId = null; assertTools(false);
   // A new, empty box has no stored annotation yet, but still locks other tools.
   context.startTextEdit({ ...original, id: 'new', text: '' }, true); assertTools(true);

@@ -31,7 +31,7 @@ function setup(tool) {
   };
   const context = vm.createContext({ $, document: {
     addEventListener(type, handler, capture) { documentHandlers[type] = { handler, capture }; },
-  }, editorTab: false, previewMenuOpen: true, penEnabled: tool === 'pen', textEnabled: tool === 'text',
+  }, editorTab: true, previewMenuOpen: true, penEnabled: tool === 'pen', textEnabled: tool === 'text',
   busy: false, stroke: null, annotationDrag: null, pageDrag: null, selectedAnnotationId: null, selectedStrokeIds: new Set(), selectedTextIds: new Set(),
   activePreviewMenu: tool, textEdit: null, viewport: {}, renderedPageId: 'page',
   model: { activeId: 'page', active: { rotation: 0, strokes: [] },
@@ -178,8 +178,9 @@ test('settings, controls, object clicks and non-editing gestures do not clear se
 });
 
 for (const tool of ['pen', 'text', 'stamp']) {
-  test(`${tool}: first preview gesture only closes the menu; next gesture edits`, () => {
+  test(`${tool}: side panel paper gestures cannot edit even if an old tool mode remains`, () => {
     const { context, $, calls, pointerdown } = setup(tool);
+    context.editorTab = false;
     const first = pointerdown();
     assert.equal(context.previewMenuOpen, false);
     assert.equal($(`panel-${tool}`).hidden, true);
@@ -192,15 +193,16 @@ for (const tool of ['pen', 'text', 'stamp']) {
     $('ink-canvas').handlers.pointerup({ ...first, type: 'pointerup' });
     assert.deepEqual(calls, []);
     pointerdown();
-    if (tool === 'pen') {
-      assert.equal(context.stroke.id, 'annotation');
-      assert.ok(calls.includes('capture'));
-    } else assert.deepEqual(calls, ['format', tool === 'stamp' ? 'place-stamp' : 'place-text']);
+    assert.equal(context.stroke, null);
+    assert.equal(calls.includes('capture'), false);
+    assert.equal(calls.includes('place-stamp'), false);
+    assert.equal(calls.includes('place-text'), false);
   });
 
   test(`${tool}: clicking existing annotations or preview margins only dismisses`, () => {
     for (const target of ['handle', 'blank']) {
       const { context, calls, pointerdown } = setup(tool);
+      context.editorTab = false;
       assert.equal(pointerdown({ target }).stopped, true);
       assert.equal(context.previewMenuOpen, false);
       assert.deepEqual(calls, []);

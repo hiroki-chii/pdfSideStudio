@@ -49,7 +49,7 @@ function setup(tool = 'pen', opacity = 0.75) {
       convertToPdfPoint: (x, y) => [x, y], convertToViewportPoint: (x, y) => [x, y] },
     document: { querySelectorAll: selector => selector === 'button, input, select, textarea' ? [...nodes.values()] : [],
       addEventListener(type, handler) { documentHandlers[type] = handler; } },
-    editorTab: false, busy: false, selectedAnnotationId: null, selectedStrokeIds: new Set(), selectedTextIds: new Set(),
+    editorTab: true, busy: false, selectedAnnotationId: null, selectedStrokeIds: new Set(), selectedTextIds: new Set(),
     annotationFormatPreview: null, strokeFormatSession: null, textFormatSession: null, textEdit: null,
     textEnabled: false, penEnabled: false, activePreviewMenu: 'select', previewMenuOpen: false,
     stroke: null, annotationDrag: null, pageDrag: null,
@@ -63,7 +63,7 @@ function setup(tool = 'pen', opacity = 0.75) {
     },
   });
   vm.runInContext(script, context);
-  context.selectAnnotation(original);
+  context.selectAnnotation(original, { openMenu: false });
   return { context, $, model, original, other, text, watermark, canvas, documentHandlers };
 }
 
@@ -496,7 +496,7 @@ test('stroke selection loads styles, keeps history, and opens formatting from th
   const { context, $, model, original } = setup();
   const history = model.past.length;
   model.future.push(model.snapshot());
-  context.selectAnnotation(original);
+  context.selectAnnotation(original, { openMenu: false });
   assert.equal($('pen-color').value, original.color);
   assert.equal($('pen-width').value, original.width);
   assert.equal($('pen-transparency').value, 25);

@@ -30,7 +30,7 @@ async function setup(rotation = 0, scale = 1) {
   let id = 0;
   const errors = [];
   const context = vm.createContext({ $, model, viewport, textLayout, moveText, paintOverlay,
-    busy: false, stroke: null, annotationDrag: null, pageDrag: null, renderedPageId: 'a',
+    editorTab: true, busy: false, stroke: null, annotationDrag: null, pageDrag: null, renderedPageId: 'a',
     activePreviewMenu: 'stamp', textEnabled: false, penEnabled: false,
     uid: () => `stamp-${++id}`, pdfPoint: event => viewport.convertToPdfPoint(event.clientX, event.clientY),
     refreshThumbnails() {}, refreshAnnotationHandles() {}, status() {}, updateControls() {},

@@ -7,13 +7,17 @@
   </head>
   <body>
     <div class="app">
+      <aside id="full-features-notice" class="side-panel-only full-features-notice" aria-label="フル機能のご案内" hidden>
+        <p>すべての機能を使うには、<strong>「フル機能」</strong>をクリックしてください。</p>
+        <button id="close-full-features-notice" type="button" aria-label="フル機能の案内を閉じる" title="閉じる">×</button>
+      </aside>
       <header class="app-header">
         <div class="brand"><span class="brand-mark" aria-hidden="true">P<span>✦</span></span><div><h1>PDF Side Studio</h1><p>PDFを、手元で自由に。</p></div></div>
         <div id="editor-file-actions" class="editor-file-actions" role="group" aria-label="ファイル操作" hidden></div>
         <div class="header-actions">
           <button id="toggle-editor-sidebar" class="editor-sidebar-toggle" type="button" aria-controls="editor-sidebar" aria-expanded="false" data-sidebar-label="編集メニュー" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path class="sidebar-indicator" d="M5 7h5v10H5z" /><path d="M11 5v14" /></svg></button>
           <button id="toggle-page-list-section" class="editor-sidebar-toggle" type="button" aria-controls="page-list-section" aria-expanded="false" data-sidebar-label="ページ一覧" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path class="sidebar-indicator" d="M14 7h5v10h-5z" /><path d="M13 5v14" /></svg></button>
-          <button id="open-editor-tab" type="button" title="全画面編集モードを新規タブで開く" hidden>新規タブで編集</button>
+          <button id="open-editor-tab" type="button" title="すべての機能を新規タブで開く" hidden>フル機能</button>
           <button id="help" class="icon-button" aria-label="使い方を表示" title="使い方">?</button>
         </div>
       </header>
@@ -30,11 +34,13 @@
         <section id="empty-state" class="empty-state">
           <div class="empty-state-heading">
             <div class="paper-art" aria-hidden="true"><div class="back-paper"></div><div class="front-paper"><span class="paper-label">PDF</span><i></i><i></i><i></i><span class="paper-spark">✦</span></div></div>
-            <h2>ちょっとした編集を、<br />このパネルひとつで。</h2>
+            <h2 class="editor-only">ちょっとした編集を、<br />このタブひとつで。</h2>
+            <h2 class="side-panel-only">資料をまとめて、<br />向きをそろえる。</h2>
           </div>
           <div class="empty-state-details">
-            <p>資料をまとめる。必要なページを取り出す。<br />メモを添えて、そのまま保存。</p>
-            <div class="feature-chips"><span>結合・分割</span><span>回転</span><span>ペン</span><span>透かし</span></div>
+            <p class="editor-only">資料をまとめる。必要なページを取り出す。<br />メモを添えて、そのまま保存。</p>
+            <p class="side-panel-only">PDFや画像を追加順に結合。<br />ページを回転して、そのまま保存。</p>
+            <div class="feature-chips"><span class="side-panel-only">結合</span><span class="editor-only">結合・分割</span><span>回転</span><span class="editor-only">ペン</span><span class="editor-only">透かし</span></div>
             <p class="empty-note">画像は1枚ずつPDFのページになり、ほかのファイルと結合できます。</p>
           </div>
         </section>
@@ -42,7 +48,7 @@
           <section id="page-list-section" class="page-list-section" aria-labelledby="page-list-title">
             <div class="section-heading"><h2 id="page-list-title">ページ <span id="page-count" class="count">0</span></h2></div>
             <div id="source-legend" class="source-legend" aria-label="追加したファイル"></div>
-            <p id="page-drag-hint" class="page-drag-hint">ドラッグで並べ替え · ページにカーソルを合わせてコピー・削除</p>
+            <p id="page-drag-hint" class="page-drag-hint">ドラッグで並べ替え · ページにカーソルを合わせてコピー・削除・回転</p>
             <div id="page-list" class="page-list" aria-label="ページ一覧" aria-describedby="page-drag-hint"></div>
           </section>
           <section class="preview-section" aria-label="ページプレビュー">
@@ -186,7 +192,8 @@
         <fieldset class="tool-settings-group"><legend>保存の設定</legend><label class="tool-field" for="output-name">ファイル名<input id="output-name" value="edited" maxlength="120" autofocus /></label></fieldset>
         <button id="save" class="save-button">PDFを保存 <span id="save-count"></span><span aria-hidden="true">↓</span></button>
         <button id="split" class="split-button">1ページずつ分割（ZIP） <span id="split-count"></span></button>
-        <p class="split-note">全ページを個別のPDFにしてZIPで保存します。</p>
+        <p class="split-note editor-only">全ページを個別のPDFにしてZIPで保存します。</p>
+        <p class="side-panel-only">分割などの編集は「フル機能」から使えます。</p>
         <p id="save-status" class="status" role="status" aria-live="polite" hidden></p>
         <p class="save-note">編集中の内容はメモリー上にあります。すべての編集画面を閉じる前に保存してください。</p>
       </div>
@@ -198,13 +205,14 @@
     </dialog>
     <dialog id="help-dialog">
       <div class="dialog-heading"><h2>使い方</h2><button id="close-help" class="icon-button" aria-label="使い方を閉じる">×</button></div>
-      <ol><li>PDFや画像（JPEG・PNG・WebP）を追加します。画像は1枚につき1ページになり、複数ファイルは追加順に結合されます。</li><li>ページ一覧でサムネイルをドラッグして順序を変更します。クリックするとプレビューが切り替わり、そのページのコピー・削除を選べます。</li><li>コピー・削除はページ一覧から選んだページに適用します。回転・透かしは表示中のページ／すべてのページを指定できます。</li><li>「PDFを保存」で全ページを出力します。分割は保存画面から実行します。</li></ol>
+      <p class="side-panel-only">サイドバーでは結合・並べ替え・コピー・削除・回転ができます。文字やペンなどの編集は、上部の「フル機能」から続けられます。</p>
+      <ol><li>PDFや画像（JPEG・PNG・WebP）を追加します。画像は1枚につき1ページになり、複数ファイルは追加順に結合されます。</li><li>ページ一覧をクリックするとプレビューが切り替わります。ドラッグで並べ替え、各ページのボタンでコピー・削除・左右90度の回転ができます。</li><li>プレビューの回転操作では、表示中のページ／すべてのページを指定できます。<span class="editor-only">ペン・文字・透かしなども使えます。</span></li><li>「PDFを保存」で全ページを出力します。<span class="editor-only">分割は保存画面から実行します。</span></li></ol>
       <p>追加ボタンから「ファイルを参照」または「タブを選んで取り込む」を選びます。PDF・画像はサイドパネル内や編集タブ内のどこにでもドロップできます。タブを取り込むときは、初回にChromeの画面取り込み権限を許可し、対象タブを選んで「共有」を押します。</p>
       <p>サイドパネルでは「表示中のタブを取り込む」を選ぶと、いま表示しているタブがそのまま1ページ追加されます。アクセスを求められた場合は、Chromeで許可するか、対象タブでツールバーの PDF Side Studio アイコンを押してからやり直します。</p>
-      <p>分割では全ページを1ページずつPDFにしてZIPで保存します。</p>
+      <p class="editor-only">分割では全ページを1ページずつPDFにしてZIPで保存します。</p>
       <p>パスワード保護PDFは非対応です。既存の注釈・リンク・添付ファイル・起動アクションは保存時に引き継ぎません。フォーム入力値等の保持は保証しません。電子署名は無効になります。元ファイルを残し、保存後のPDFを確認してください。</p>
       <p>1ファイル50MiB、合計150MiB・300ページまで。編集履歴は直近30操作を保持します。安全上限を超える複雑なPDFは読み込めない場合があります。</p>
-      <p>印刷タブに資料が表示されるまでは編集画面を開いたままにしてください。印刷用データはメモリー内で受け渡します。</p>
+      <p class="editor-only">印刷タブに資料が表示されるまでは編集画面を開いたままにしてください。印刷用データはメモリー内で受け渡します。</p>
       <p>ページ上の既存テキストの書き換えや、元PDFに含まれる透かしの除去はできません。</p>
     </dialog>
     <script type="module" src="/src/app.js"></script>

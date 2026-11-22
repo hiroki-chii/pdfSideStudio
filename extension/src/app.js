@@ -52,7 +52,20 @@ if (editorTab) {
       if (panel === 'page-list-section') revealActiveThumbnail();
     });
   }
-} else $('open-editor-tab').hidden = false;
+} else {
+  document.documentElement.classList.add('side-panel');
+  $('open-editor-tab').hidden = false;
+  $('full-features-notice').hidden = false;
+  $('close-full-features-notice').addEventListener('click', () => {
+    $('full-features-notice').hidden = true;
+    $('open-editor-tab').focus({ preventScroll: true });
+  });
+  // Keep the compact rotation controls separate from the full tool-menu layer.
+  $('preview-area').append($('panel-rotation'));
+  $('rotation-scope').options[0].textContent = 'このページを回転';
+  $('rotation-scope').options[1].textContent = '全ページ回転';
+  $('rotation-scope').setAttribute('aria-label', '回転するページ');
+}
 
 for (const option of $('text-font').options) {
   option.style.fontFamily = textFontFamily(option.value);
@@ -98,7 +111,7 @@ let dragScrollFrame = null;
 let pageDrag = null;
 const uid = () => crypto.randomUUID();
 const previewMenus = ['rotation', 'pen', 'stamp', 'watermark'];
-let activePreviewMenu = 'select';
+let activePreviewMenu = editorTab ? 'select' : 'rotation';
 let previewMenuOpen = false;
 const toolDescriptions = {
   'open-select': '追加した文字・描画・透かしをクリックして選択。ドラッグで移動、Deleteで削除。Escで選択モードに戻ります。',
@@ -136,7 +149,7 @@ function activeRequired() {
 
 function updateControls() {
   document.querySelectorAll('button, input, select, textarea').forEach(element => {
-    if (['help', 'close-help', 'close-tool-help', 'theme-mode'].includes(element.id) || element.closest('#fullscreen-preview')) return;
+    if (['help', 'close-help', 'close-tool-help', 'theme-mode', 'close-full-features-notice'].includes(element.id) || element.closest('#fullscreen-preview')) return;
     element.disabled = busy;
   });
   $('undo').disabled = busy || !model.past.length;
@@ -221,8 +234,10 @@ function updateControls() {
       ? `${target}を回転します。` : `対象: ${all ? `全${model.pages.length}ページ` : `${index + 1}ページ目`}（透かし${watermarkCount}件）`;
     $(`${name}-target-hint`).dataset.all = String(all);
     if (name === 'rotation') {
-      $('rotate-left').textContent = all ? `全${model.pages.length}ページを左90°` : '↶ 左に90°';
-      $('rotate-right').textContent = all ? `全${model.pages.length}ページを右90°` : '↷ 右に90°';
+      $('rotate-left').textContent = editorTab ? all ? `全${model.pages.length}ページを左90°` : '↶ 左に90°' : '↶';
+      $('rotate-right').textContent = editorTab ? all ? `全${model.pages.length}ページを右90°` : '↷ 右に90°' : '↷';
+      $('rotate-left').setAttribute('aria-label', `${target}を左に90度回転`);
+      $('rotate-right').setAttribute('aria-label', `${target}を右に90度回転`);
     } else {
       $('apply-watermark').textContent = all ? `全${model.pages.length}ページに適用` : 'このページに適用';
       $('remove-watermark').textContent = all ? `全${model.pages.length}ページで削除` : 'このページで削除';
@@ -247,6 +262,21 @@ function updateControls() {
   document.querySelectorAll('.page-button').forEach(button => {
     button.classList.toggle('reorderable', !busy && model.pages.length > 1);
   });
+  if (!editorTab) {
+    for (const name of ['select', 'pen', 'text', 'stamp', 'watermark']) {
+      $(`open-${name}`).hidden = true;
+      $(`open-${name}`).disabled = true;
+      $(`panel-${name}`).hidden = true;
+      for (const control of $(`panel-${name}`).querySelectorAll('button, input, select, textarea')) control.disabled = true;
+    }
+    $('open-rotation').hidden = true;
+    $('panel-rotation').hidden = !model.pages.length;
+    $('close-rotation').hidden = true;
+    $('split').hidden = true;
+    $('split').disabled = true;
+    $('print').hidden = true;
+    $('print').disabled = true;
+  }
 }
 
 function refresh() {
@@ -260,7 +290,10 @@ function refresh() {
   if (editorTab) {
     updateEditorSidebarLayout(hasPages, hasHistory);
     document.querySelector('.preview-toolbar').hidden = !hasPages;
-  } else $('page-list-section').hidden = !hasPages;
+  } else {
+    $('page-list-section').hidden = !hasPages;
+    document.querySelector('.preview-toolbar').hidden = !hasPages;
+  }
   // The side panel still needs its preview row for history after the last page is removed.
   $('workspace').hidden = !hasPages && (editorTab || !hasHistory);
   $('empty-state').hidden = hasPages;
@@ -374,6 +407,8 @@ function refreshThumbnails() {
     for (const [name, title, icon, action] of [
       ['duplicate', 'コピー', '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/>', duplicatePage],
       ['delete', '削除', '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>', deletePage],
+      ['rotate-left', '左に90°回転', '<path d="M4 10a8 8 0 1 1 2 8M4 4v6h6"/>', id => rotatePage(id, -90)],
+      ['rotate-right', '右に90°回転', '<path d="M20 10a8 8 0 1 0-2 8M20 4v6h-6"/>', id => rotatePage(id, 90)],
     ]) {
       const actionButton = document.createElement('button');
       actionButton.type = 'button';
@@ -385,7 +420,8 @@ function refreshThumbnails() {
         if (pageDrag) return;
         await run(() => action(page.id));
         if (event.detail === 0) {
-          ($('page-list').querySelector('.page-card.active .page-button') ?? $('undo')).focus({ preventScroll: true });
+          const focusId = name.startsWith('rotate-') ? page.id : model.activeId;
+          ([...$('page-list').querySelectorAll('.page-button')].find(button => button.dataset.id === focusId) ?? $('undo')).focus({ preventScroll: true });
         }
       });
       actions.append(actionButton);
@@ -975,7 +1011,12 @@ async function splitPdf() {
   status(`${records.length}個のPDFを含むZIPの保存を開始しました。`, 'success');
 }
 
-function on(id, action) { $(id).addEventListener('click', () => run(action)); }
+function on(id, action) {
+  $(id).addEventListener('click', () => {
+    if (!editorTab && ['print', 'split', 'apply-watermark', 'remove-watermark'].includes(id)) return;
+    run(action);
+  });
+}
 on('open-editor-tab', openEditorTab);
 const canCaptureCurrentTab = !editorTab && globalThis.chrome?.tabs?.captureVisibleTab;
 const canCaptureSelectedTab = globalThis.chrome?.permissions?.request && globalThis.navigator?.mediaDevices?.getUserMedia && globalThis.ImageCapture;
@@ -1041,6 +1082,11 @@ function deletePage(id) {
   model.commit(pages, { activeId: pages[Math.min(index, pages.length - 1)]?.id ?? null });
   refresh(); status('ページを削除しました。「元に戻す」で復元できます。', 'success');
 }
+function rotatePage(id, angle) {
+  pageActionRequired(id);
+  model.update(new Set([id]), page => ({ ...page, rotation: normalizeRotation(page.rotation + angle) }));
+  refresh(); status('ページを回転しました。「元に戻す」で復元できます。', 'success');
+}
 on('undo', () => { model.undo(); refresh(); status('ひとつ前の状態に戻しました。'); });
 on('redo', () => { model.redo(); refresh(); status('操作をやり直しました。'); });
 $('previous').addEventListener('click', () => navigatePage(-1));
@@ -1091,7 +1137,7 @@ function selectPage(id) {
 }
 
 function resetPreviewMenu() {
-  activePreviewMenu = 'select';
+  activePreviewMenu = editorTab ? 'select' : 'rotation';
   $('rotation-scope').value = 'active';
   $('watermark-scope').value = 'all';
 }
@@ -1103,6 +1149,7 @@ function enableSelection(showMenu = false) {
   resetPreviewMenu(); refreshAnnotationHandles(); updateControls();
 }
 function togglePreviewMenu(name) {
+  if (!editorTab) return;
   if (busy || stroke || annotationDrag || pageDrag || !model.active) return;
   if (name !== 'text' && (selectedText() || textEdit)) return;
   if (name !== 'pen' && selectedStroke()) return;
@@ -1118,6 +1165,7 @@ function togglePreviewMenu(name) {
 }
 $('open-select').addEventListener('click', () => togglePreviewMenu('select'));
 function openPreviewMenu(name) {
+  if (!editorTab) return;
   if (busy || stroke || annotationDrag || pageDrag || !model.active) return;
   if (activePreviewMenu === name && !selectedAnnotationId) {
     previewMenuOpen = true; updateControls(); return;
@@ -1860,6 +1908,10 @@ function positionTextTailHandle() {
   handle.style.top = `${y * scale}px`;
 }
 function refreshAnnotationHandles() {
+  if (!editorTab) {
+    for (const handle of $('text-handles').querySelectorAll('.text-handle')) handle.remove();
+    return;
+  }
   if (!model.active || !viewport) return;
   const handles = new Map([...$('text-handles').querySelectorAll('.text-handle')].map(button => [button.dataset.annotationId, button]));
   for (const annotation of pageAnnotations()) {
@@ -2048,6 +2100,7 @@ $('stamp-number').addEventListener('change', () => {
   updateControls();
 });
 $('ink-canvas').addEventListener('pointerdown', event => {
+  if (!editorTab) return;
   if (event.button !== 0 || !event.isPrimary) return;
   if (activePreviewMenu === 'stamp') {
     if (busy || !viewport || !model.active || renderedPageId !== model.activeId || stroke || annotationDrag || pageDrag) return;
