@@ -10,7 +10,7 @@ await mkdir('dist/icons', { recursive: true });
 for (const size of [16, 48, 128]) {
   const canvas = createCanvas(size, size);
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#6553c7'; ctx.beginPath(); ctx.roundRect(0, 0, size, size, size * 0.22); ctx.fill();
+  ctx.fillStyle = '#202020'; ctx.beginPath(); ctx.roundRect(0, 0, size, size, size * 0.22); ctx.fill();
   ctx.fillStyle = '#ffffff'; ctx.font = `bold ${size * 0.74}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('P', size * 0.49, size * 0.55);
   await writeFile(`dist/icons/icon${size}.png`, canvas.toBuffer('image/png'));
 }

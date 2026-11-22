@@ -8,7 +8,7 @@
 #open-editor-tab {
   padding: 5px 8px;
   font-size: 11px;
-  color: var(--purple);
+  color: var(--ink);
   border-color: var(--border-accent);
 }
 
@@ -52,7 +52,7 @@
 }
 .editor-sidebar-toggle svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.6; }
 .editor-sidebar-toggle .sidebar-indicator { stroke: none; }
-.editor-sidebar-toggle[aria-expanded="true"] { color: var(--purple); }
+.editor-sidebar-toggle[aria-expanded="true"] { color: var(--ink); }
 .editor-sidebar-toggle[aria-expanded="true"] .sidebar-indicator { fill: currentColor; }
 
 .editor-tab main {
@@ -194,14 +194,7 @@
   justify-content: center;
   gap: 10px;
   padding: 10px 16px;
-  border-color: var(--purple);
-  background: var(--purple);
-  color: var(--bg);
   text-align: center;
-}
-.editor-tab #empty-state .upload-button:hover:not(:disabled) {
-  border-color: var(--purple);
-  background: color-mix(in srgb, var(--purple) 88%, var(--ink));
 }
 .editor-tab #empty-state .upload-button strong { font-size: 16px; }
 .editor-tab #empty-state .upload-icon,
