@@ -6,6 +6,7 @@ Chrome拡張機能「PDF Side Studio」です。サイドパネルでPDFの結�
 - [Chrome Web Store掲載用スクリーンショット](extension/docs/chrome-web-store/README.md)
 - [プライバシーポリシー](index.md)
 - [検証記録](extension/TESTING.md)
+- [A4・600 dpiの読み込みテスト用PDF（2ページ）](extension/docs/a4-600dpi-test.pdf)
 
 ## ビルド
 

@@ -33,7 +33,7 @@ export async function openPdfPreview(bytes, pageCount) {
     standardFontDataUrl: new URL('standard_fonts/', document.baseURI).href,
     wasmUrl: new URL('wasm/', document.baseURI).href,
     useWasm: false, useWorkerFetch: false, enableXfa: false,
-    maxImageSize: PDF_LIMITS.imagePixels, canvasMaxAreaInBytes: PDF_LIMITS.imagePixels * 4 });
+    maxImageSize: PDF_LIMITS.imagePixels, canvasMaxAreaInBytes: PDF_LIMITS.previewCanvasBytes });
   loading.onPassword = () => { loading.destroy().catch(() => {}); };
   let timer;
   try {

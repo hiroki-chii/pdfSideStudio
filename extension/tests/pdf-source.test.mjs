@@ -46,6 +46,7 @@ test('source reader uses local assets and rejects excess pages before preview lo
   assert.equal(options.isEvalSupported, false);
   assert.equal(options.cMapUrl, 'https://example.test/cmaps/');
   assert.equal(options.maxImageSize, PDF_LIMITS.imagePixels);
+  assert.equal(options.canvasMaxAreaInBytes, 64 * 1024 * 1024);
   assert.equal(options.enableXfa, false);
 });
 
