@@ -87,6 +87,21 @@ function setup() {
   return { context, $, model, original, errors };
 }
 
+test('committing text clears the status message in both editor views', () => {
+  for (const editorTab of [false, true]) {
+    const { context, $, model, original } = setup();
+    context.editorTab = editorTab;
+    vm.runInContext(slice('function status(', '\nfunction fail('), context);
+    context.status('前回の処理に失敗しました。', 'error');
+    assert.equal($('status').textContent, '前回の処理に失敗しました。');
+    context.startTextEdit(original);
+    context.textEdit.editor.value = '確定したテキスト';
+    assert.equal(context.finishTextEdit(), true);
+    assert.equal(model.active.strokes[0].text, '確定したテキスト');
+    assert.equal($('status').textContent, '');
+  }
+});
+
 test('editing framed and filled stamps preserves the frame, padded position, contrast and history', () => {
   for (const stampPattern of ['circle', 'circle-filled', 'square', 'square-filled']) {
     const { context, model, original } = setup();

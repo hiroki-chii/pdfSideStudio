@@ -88,6 +88,30 @@ test('the tab keeps all tools, split and print available', () => {
   for (const id of ['split', 'print']) assert.equal($(id).disabled, false);
 });
 
+test('both editing views suppress routine status and display errors and save progress', () => {
+  for (const editorTab of [false, true]) {
+    const { $, context } = setup(editorTab);
+    vm.runInContext(slice('function status(', '\nfunction fail('), context);
+    for (const kind of ['', 'success']) {
+      context.status('操作の案内', kind);
+      assert.equal($('status').textContent, '');
+    }
+
+    context.status('読み込みに失敗しました。', 'error');
+    assert.equal($('status').textContent, '読み込みに失敗しました。');
+
+    $('save-dialog').open = true;
+    context.status('PDFを作成中…');
+    assert.equal($('status').textContent, '');
+    assert.equal($('save-status').textContent, 'PDFを作成中…');
+
+    $('save-dialog').open = false;
+    $('editor-file-actions').hidden = true;
+    context.status('ファイルを読み込んでいます…');
+    assert.equal($('status').textContent, editorTab ? 'ファイルを読み込んでいます…' : '');
+  }
+});
+
 test('side panel rotation stays compact and announces the selected target, while the tab keeps text buttons', () => {
   for (const editorTab of [false, true]) {
     const { $, context } = setup(editorTab);

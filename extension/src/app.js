@@ -131,7 +131,10 @@ for (const [id, description] of Object.entries(toolDescriptions)) {
 }
 
 function status(message, kind = '') {
-  $('status').textContent = message; $('status').className = `status ${kind}`;
+  const statusNode = $('status');
+  const showStatus = kind === 'error' || (editorTab && $('editor-file-actions').hidden);
+  statusNode.textContent = showStatus ? message : '';
+  statusNode.className = `status ${kind}`;
   if ($('save-dialog').open) {
     $('save-status').hidden = false;
     $('save-status').textContent = message; $('save-status').className = `status ${kind}`;
@@ -355,9 +358,11 @@ function updateEditorSidebarLayout(hasPages, hasHistory) {
     $('add-files').querySelector('strong').textContent = '追加';
     fileActions.prepend(upload);
   }
-  const sidebar = $('editor-sidebar');
-  const statusDestination = sidebar.hidden ? fileActions.parentElement : sidebar;
-  if (statusNode.parentElement !== statusDestination) statusDestination.append(statusNode);
+  const header = fileActions.parentElement;
+  if (statusNode.parentElement !== header) {
+    if (!statusNode.classList.contains('error')) statusNode.textContent = '';
+    header.append(statusNode);
+  }
 }
 
 function refreshThumbnails() {
@@ -744,7 +749,7 @@ async function captureCurrentTab() {
         if (attempt > 0) throw new Error(temporaryAccessHint);
         status('Chrome の確認画面で、タブを取り込むためのサイトアクセスを許可してください。');
         if (!await chrome.permissions.request({ origins: ['<all_urls>'] })) {
-          status(temporaryAccessHint);
+          status(temporaryAccessHint, 'error');
           return;
         }
       } else if (attempt > 0 || !/image readback failed|view is invisible/i.test(error.message)) {
@@ -763,7 +768,7 @@ async function captureCurrentTab() {
 
 async function captureSelectedTab() {
   if (!await chrome.permissions.request({ permissions: ['desktopCapture'] })) {
-    status('タブを取り込むには、Chrome の確認画面で画面取り込みを許可してください。');
+    status('タブを取り込むには、Chrome の確認画面で画面取り込みを許可してください。', 'error');
     return;
   }
 
@@ -1591,9 +1596,9 @@ function finishTextEdit(cancel = false) {
         ? p.strokes.flatMap(item => item.id === original.id ? (empty ? [] : [draft]) : [item])
         : [...p.strokes, draft] }));
       refreshThumbnails();
-      const message = draft.boxShape === 'bubble' ? '吹き出しを確定しました。本体をクリックして再編集、しっぽをドラッグして先端を移動できます。'
-        : 'テキストを確定しました。クリックで再編集、テキストアイコンで書式を変更できます。';
-      status(empty ? 'テキストを削除しました。' : message, 'success');
+      if (empty) status('テキストを削除しました。', 'success');
+      else if (draft.boxShape === 'bubble') status('吹き出しを確定しました。本体をクリックして再編集、しっぽをドラッグして先端を移動できます。', 'success');
+      else status('');
     }
     selectedAnnotationId = empty ? null : draft.id;
   } else selectedAnnotationId = original?.id ?? null;
