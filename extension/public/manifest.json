@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PDF Side Studio",
-  "version": "1.8.0",
+  "version": "2.0.0",
   "description": "サイドパネルでPDFを結合・並べ替え・コピー・削除・回転。新規タブで分割、ペン、文字、透かしなどの全機能を使えます。すべて端末内で処理します。",
   "minimum_chrome_version": "120",
   "permissions": ["sidePanel", "activeTab"],
