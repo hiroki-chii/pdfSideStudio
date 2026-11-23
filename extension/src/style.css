@@ -115,6 +115,19 @@ dialog.fullscreen-preview{position:fixed;inset:0;width:100vw;height:100dvh;max-w
 #text-tail-handle{position:absolute;z-index:1;width:24px;height:24px;padding:0;border:0;background:transparent;transform:translate(-50%,-50%);pointer-events:auto;touch-action:none;cursor:move;display:grid;place-items:center}
 #text-tail-handle::after{content:"";width:11px;height:11px;border:2px solid var(--annotation-selection);border-radius:50%;background:#fff}
 #text-tail-handle:hover::after,#text-tail-handle:focus-visible::after{background:color-mix(in srgb, var(--annotation-selection) 15%, white)}
+#image-resize-handles{position:absolute;z-index:1;pointer-events:none}
+#image-resize-handles span{position:absolute;display:grid;place-items:center;width:24px;height:24px;transform:translate(-50%,-50%);touch-action:none;pointer-events:auto;cursor:nwse-resize}
+#image-resize-handles span::after{content:"";width:11px;height:11px;border:2px solid var(--annotation-selection);border-radius:2px;background:#fff}
+#image-resize-handles span:hover::after{background:color-mix(in srgb, var(--annotation-selection) 20%, white)}
+#image-resize-handles [data-resize-x="-1"]{left:0}
+#image-resize-handles [data-resize-x="0"]{left:50%;cursor:ns-resize}
+#image-resize-handles [data-resize-x="1"]{left:100%}
+#image-resize-handles [data-resize-y="-1"]{top:0}
+#image-resize-handles [data-resize-y="0"]{top:50%;cursor:ew-resize}
+#image-resize-handles [data-resize-y="1"]{top:100%}
+#image-resize-handles [data-resize-x="0"]::after{width:14px;height:8px}
+#image-resize-handles [data-resize-y="0"]::after{width:8px;height:14px}
+#image-resize-handles [data-resize-x="1"][data-resize-y="-1"],#image-resize-handles [data-resize-x="-1"][data-resize-y="1"]{cursor:nesw-resize}
 .tool-field input:not([type=color]),.tool-field select{width:100%}
 .tool-settings input:not([type=color]):not([type=range]),.tool-settings select{padding:5px 6px;font-size:11px}
 .tool-settings input[type=number]{width:64px}

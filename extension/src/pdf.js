@@ -1,5 +1,6 @@
 export { buildPdf } from './pdf-export.js';
 import { styledRuns, textStyle, textBackground } from './text-format.js';
+import { paintImage } from './image-overlay.js';
 
 export function imagePlacement(viewport) {
   const [x, y] = viewport.convertToPdfPoint(0, viewport.height);
@@ -56,6 +57,7 @@ export function paintOverlay(ctx, record, viewport, { hideTextFor } = {}) {
   }
   for (const stroke of record.strokes) {
     if (stroke.tool === 'text') paintText(ctx, stroke, viewport, stroke.id !== undefined && stroke.id === hideTextFor);
+    else if (stroke.tool === 'image') paintImage(ctx, stroke, viewport);
     else paintStroke(ctx, stroke, viewport);
   }
 }

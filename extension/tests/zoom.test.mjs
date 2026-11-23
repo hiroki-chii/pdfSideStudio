@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { prepareOverlayImages } from '../src/image-overlay.js';
 
 const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
 const previewScript = app.slice(app.indexOf('function setPreviewZoom('), app.indexOf('\nasync function addFiles('));
@@ -28,7 +29,7 @@ async function setup(width = 220, editorTab = false) {
   const context = vm.createContext({ $, Math, editorTab, busy: false, stroke: null, annotationDrag: null, pageDrag: null,
     previewZoom: 1, minPreviewZoom: 0.5, maxPreviewZoom: 4, renderedPageId: null,
     viewport: null, renderTask: null, renderVersion: 0, model: { pages, active: pages[0] },
-    window: { devicePixelRatio: 2 }, updateControls() {}, refreshAnnotationHandles() {},
+    window: { devicePixelRatio: 2 }, prepareOverlayImages, updateControls() {}, refreshAnnotationHandles() {},
     paintTextPreview() { paints.push(context.viewport); }, fail(error) { errors.push(error); },
     sources: new Map([['pdf', { name: 'fixture.pdf', preview: { async getPage(number) {
       const page = await pdf.getPage(number);

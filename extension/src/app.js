@@ -1,7 +1,7 @@
 import './style.css';
 import './theme.css';
 import './editor-tab.css';
-import { EditorModel, safeFilename, normalizeRotation, sourceAppearance } from './model.js';
+import { EditorModel, MAX_FILE_BYTES, safeFilename, normalizeRotation, sourceAppearance } from './model.js';
 import { paintOverlay, textFontFamily, textLayout, moveText, moveTextTail, strokeLayout, moveStroke, scaleStrokes, watermarkLayout, moveWatermark } from './pdf.js';
 import { createThemeController } from './theme.js';
 import { storePrintJob, deletePrintJob, purgeLegacyPrintJobs } from './print-job.js';
@@ -10,11 +10,12 @@ import { connectEditorSync, sharePdfSource } from './editor-sync.js';
 import { createFullscreenPreview } from './fullscreen-preview.js';
 import { styledRuns, textStyle, textBackground, formatTextBackground, formatText, replaceText } from './text-format.js';
 import { createTextEditor } from './text-editor.js';
-import { exportDocument } from './pdf-processor.js';
+import { exportDocument, runPdfJob } from './pdf-processor.js';
 import { createPageOverlay as createOverlay, createPrintPages } from './raster.js';
 import { download } from './download.js';
 import { openPdfPreview, readPdfSource, pdfErrorMessage } from './pdf-source.js';
 import { createToolHelp } from './tool-help.js';
+import { createImageAnnotation, imageLayout, moveImage, prepareOverlayImages, resizeImageFromHandle, restoreImageAspectRatio } from './image-overlay.js';
 
 const $ = id => document.getElementById(id);
 const editorUrl = new URL(location.href);
@@ -110,13 +111,14 @@ let dragPointer = null;
 let dragScrollFrame = null;
 let pageDrag = null;
 const uid = () => crypto.randomUUID();
-const previewMenus = ['rotation', 'pen', 'stamp', 'watermark'];
+const previewMenus = ['rotation', 'pen', 'stamp', 'watermark', 'image'];
 let activePreviewMenu = editorTab ? 'select' : 'rotation';
 let previewMenuOpen = false;
 const toolDescriptions = {
-  'open-select': '追加した文字・描画・透かしをクリックして選択。ドラッグで移動、Deleteで削除。Escで選択モードに戻ります。',
+  'open-select': '追加した文字・描画・画像・透かしをクリックして選択。ドラッグで移動、Deleteで削除。Escで選択モードに戻ります。',
   'open-pen': '色・太さ・透明度を設定して紙面をドラッグ。「選択」またはEscで選択モードに戻ります。',
   'open-text': '紙面をクリックしてテキストを1つ追加。「入力を確定」で選択モードに戻ります。配置前のEscで終了。',
+  'open-image': '画像を追加するメニューを開きます。選択した画像の透明度も調整できます。',
   'open-stamp': '紙面をクリックするたびに番号を配置し、次の番号を1つ増やします。Escで選択モードに戻ります。',
   'open-rotation': '対象ページを選び、方向ボタンまたはCtrl＋←／→で左右90度ずつ回転。「元に戻す」で取り消せます。',
   'open-watermark': '文字・色・不透明度・対象を設定し、「適用」で反映。透かし選択中はCtrl＋←／→で不透明度を1%ずつすぐ変更できます。対象ページの追加済み透かしを置き換えます。',
@@ -175,7 +177,7 @@ function updateControls() {
   const textSelected = !!(selectedText() || textEdit);
   const strokeSelected = !!selectedStroke();
   const selectedMenu = strokeSelected ? 'pen' : textEnabled || textSelected ? 'text'
-    : selected?.tool === 'watermark' ? 'watermark' : activePreviewMenu;
+    : ['image', 'watermark'].includes(selected?.tool) ? selected.tool : activePreviewMenu;
   const visibleMenu = previewMenuOpen ? selectedMenu : null;
   const pressedMenu = !editorTab && selected?.tool === 'watermark' ? activePreviewMenu : selectedMenu;
   $('open-select').disabled = busy || !model.active;
@@ -183,6 +185,20 @@ function updateControls() {
   $('open-select').setAttribute('aria-controls', 'panel-select');
   $('open-select').setAttribute('aria-expanded', String(visibleMenu === 'select' && !!model.active));
   $('panel-select').hidden = !model.active || visibleMenu !== 'select';
+  const selectedImage = selected?.tool === 'image' ? annotationPreview(selected) : null;
+  $('add-overlay-image').disabled = busy || !viewport || !model.active;
+  $('image-selection-settings').hidden = !selectedImage;
+  $('image-transparency').disabled = busy || !selectedImage;
+  $('restore-image-aspect').disabled = busy || !viewport || !selectedImage || restoreImageAspectRatio(selectedImage) === selectedImage;
+  $('delete-image').disabled = busy || !selectedImage;
+  if (selectedImage) {
+    const transparency = Math.round((1 - (selectedImage.opacity ?? 1)) * 100);
+    $('image-transparency').value = transparency;
+    $('image-transparency-value').value = `${transparency}%`;
+  }
+  const imageHandles = $('image-resize-handles');
+  imageHandles.hidden = !editorTab || busy || !viewport || !selectedImage;
+  if (!imageHandles.hidden) positionImageResizeHandles(selectedImage);
   const textCount = selectedTexts().length;
   positionTextTailHandle();
   $('update-text').disabled = busy || textCount !== 1 || !viewport;
@@ -263,7 +279,7 @@ function updateControls() {
     button.classList.toggle('reorderable', !busy && model.pages.length > 1);
   });
   if (!editorTab) {
-    for (const name of ['select', 'pen', 'text', 'stamp', 'watermark']) {
+    for (const name of ['select', 'pen', 'text', 'stamp', 'watermark', 'image']) {
       $(`open-${name}`).hidden = true;
       $(`open-${name}`).disabled = true;
       $(`panel-${name}`).hidden = true;
@@ -536,6 +552,7 @@ async function pumpThumbnails() {
           const canvas = document.createElement('canvas'); canvas.width = Math.ceil(view.width); canvas.height = Math.ceil(view.height);
           const ctx = canvas.getContext('2d');
           await page.render({ canvasContext: ctx, viewport: view }).promise;
+          await prepareOverlayImages(record);
           const overlay = document.createElement('canvas'); overlay.width = canvas.width; overlay.height = canvas.height;
           paintOverlay(overlay.getContext('2d'), record, view);
           ctx.drawImage(overlay, 0, 0);
@@ -620,8 +637,11 @@ $('preview-area').addEventListener('wheel', event => {
 
 async function renderPreview(anchor = null) {
   const version = ++renderVersion;
-  renderTask?.cancel(); viewport = null; stroke = null; annotationDrag = null;
+  renderTask?.cancel(); viewport = null; stroke = null;
+  if (annotationDrag?.resizeDirection) cancelAnnotationDrag();
+  annotationDrag = null;
   $('text-tail-handle').hidden = true;
+  $('image-resize-handles').hidden = true;
   $('text-handles').querySelectorAll('.text-handle').forEach(button => button.remove());
   const record = model.active;
   if (!record) return;
@@ -659,6 +679,7 @@ async function renderPreview(anchor = null) {
     $('ink-canvas').width = canvas.width; $('ink-canvas').height = canvas.height;
     renderTask = page.render({ canvasContext: canvas.getContext('2d'), viewport: nextViewport });
     await renderTask.promise;
+    await prepareOverlayImages(record);
     if (version !== renderVersion) return;
     viewport = nextViewport;
     paintTextPreview();
@@ -1045,6 +1066,41 @@ $('file-input').addEventListener('change', event => {
   const files = [...event.target.files]; event.target.value = '';
   if (files.length) run(() => addFiles(files));
 });
+function canPasteImage() {
+  return editorTab && !busy && viewport && model.active && !stroke && !annotationDrag && !pageDrag && !textEdit;
+}
+async function insertImage(file) {
+  let annotation;
+  await run(async () => {
+    const pageId = model.activeId, view = viewport;
+    if (file.size > MAX_FILE_BYTES) throw new Error('貼り付ける画像は50 MiB以下にしてください。');
+    status('貼り付ける画像を読み込んでいます…');
+    const image = await runPdfJob({ type: 'image-overlay', bytes: new Uint8Array(await file.arrayBuffer()) });
+    const inserted = createImageAnnotation(uid(), image, view);
+    await prepareOverlayImages({ strokes: [inserted] });
+    model.update(new Set([pageId]), page => ({ ...page, strokes: [...page.strokes, inserted] }));
+    annotation = inserted;
+    selectAnnotation(annotation);
+    paintTextPreview(); refreshAnnotationHandles(); refreshThumbnails();
+    status('画像を貼り付けました。ドラッグで位置を調整できます。', 'success');
+  });
+  if (annotation && selectedAnnotationId === annotation.id) focusSelectedAnnotation();
+}
+$('add-overlay-image').addEventListener('click', () => {
+  if (canPasteImage()) $('overlay-image-input').click();
+});
+$('overlay-image-input').addEventListener('change', event => {
+  const [file] = event.target.files; event.target.value = '';
+  if (file && canPasteImage()) insertImage(file);
+});
+document.addEventListener('paste', event => {
+  if (!canPasteImage() || event.defaultPrevented || document.querySelector('dialog[open]')
+    || event.target.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) return;
+  const image = [...(event.clipboardData?.files ?? [])].find(file => ['image/jpeg', 'image/png', 'image/webp'].includes(file.type));
+  if (!image) return;
+  event.preventDefault();
+  insertImage(image);
+});
 // Prevent dropped files from navigating the extension page.
 const dropHighlight = document.documentElement;
 const clearDropHighlight = () => dropHighlight.classList.remove('dragging');
@@ -1157,7 +1213,7 @@ function togglePreviewMenu(name) {
     previewMenuOpen = false; updateControls(); return;
   }
   if (name === 'select') enableSelection(true);
-  else if ((name === 'pen' && selectedStroke()) || (editorTab && name === 'watermark' && selectedAnnotation()?.tool === name)) {
+  else if ((name === 'pen' && selectedStroke()) || (['image', 'watermark'].includes(name) && selectedAnnotation()?.tool === name)) {
     previewMenuOpen = true; updateControls();
   }
   else if (name === 'text') enableTextInsertion();
@@ -1223,16 +1279,17 @@ function replaceAnnotation(page, original, current) {
 }
 function selectedStroke() {
   const annotation = selectedAnnotation();
-  return annotation && !['text', 'watermark'].includes(annotation.tool) ? annotation : null;
+  return annotation && !['text', 'watermark', 'image'].includes(annotation.tool) ? annotation : null;
 }
 function moveAnnotation(annotation, dx, dy) {
   if (annotation.tool === 'watermark') return moveWatermark($('ink-canvas').getContext('2d'), annotation, viewport, dx, dy);
+  if (annotation.tool === 'image') return moveImage(annotation, viewport, dx, dy);
   return annotation.tool === 'text'
     ? moveText($('ink-canvas').getContext('2d'), annotation, viewport, dx, dy)
     : moveStroke(annotation, viewport, dx, dy);
 }
 function selectAnnotation(annotation, { toggle = false, preserve = false, openMenu = true } = {}) {
-  const isStroke = !['text', 'watermark'].includes(annotation.tool);
+  const isStroke = !['text', 'watermark', 'image'].includes(annotation.tool);
   const isText = annotation.tool === 'text';
   if (toggle && (isStroke || isText)) {
     finishAnnotationFormatting();
@@ -1284,7 +1341,7 @@ function selectAnnotation(annotation, { toggle = false, preserve = false, openMe
 }
 function selectedStrokes() {
   if (!selectedStroke()) return [];
-  return model.active.strokes.filter(item => !['text', 'watermark'].includes(item.tool)
+  return model.active.strokes.filter(item => !['text', 'watermark', 'image'].includes(item.tool)
     && (item.id === selectedAnnotationId || selectedStrokeIds.has(item.id)));
 }
 function syncPenControls(annotation = selectedStroke()) {
@@ -1639,17 +1696,26 @@ function finishAnnotationFormatting() {
     return;
   }
   if (!annotationFormatPreview) return;
-  const annotation = annotationFormatPreview;
+  const preview = annotationFormatPreview;
   annotationFormatPreview = null;
   const original = selectedAnnotation();
-  if (!original || annotation.id !== original.id || JSON.stringify(annotation) === JSON.stringify(original)) return;
-  if (original.tool !== 'text' && annotation.color === original.color && annotation.width === original.width
-    && (annotation.opacity ?? 1) === (original.opacity ?? 1)) return;
-  model.update(new Set([model.activeId]), p => ({ ...p,
-    strokes: p.strokes.map(item => item.id === annotation.id ? annotation : item) }));
+  if (original?.tool !== 'image' || preview.id !== original.id || preview.opacity === (original.opacity ?? 1)) return;
+  model.update(new Set([model.activeId]), page => replaceAnnotation(page, original, preview));
   refreshThumbnails(); updateControls();
-  if (annotation.tool === 'text') syncTextFormatControls();
 }
+function previewImageTransparency() {
+  const original = selectedAnnotation();
+  if (busy || stroke || annotationDrag || pageDrag || original?.tool !== 'image') return;
+  const transparency = Number($('image-transparency').value);
+  annotationFormatPreview = { ...original, opacity: (100 - transparency) / 100 };
+  $('image-transparency-value').value = `${transparency}%`;
+  paintTextPreview();
+}
+$('image-transparency').addEventListener('input', previewImageTransparency);
+$('image-transparency').addEventListener('change', () => {
+  previewImageTransparency(); finishAnnotationFormatting();
+});
+$('image-transparency').addEventListener('blur', finishAnnotationFormatting);
 function previewStrokeFormatting(id, relativeDelta) {
   $('pen-width-value').value = $('pen-width').value;
   $('pen-transparency-value').value = `${$('pen-transparency').value}%`;
@@ -1845,10 +1911,24 @@ function deleteSelectedAnnotation() {
     : { ...p, strokes: p.strokes.filter(item => !ids.has(item.id)) });
   resetPreviewMenu();
   if (editorTab) previewMenuOpen = false;
-  selectedAnnotationId = null; selectedStrokeIds.clear(); selectedTextIds.clear(); refresh(); status(`選択した${annotation.tool === 'text' ? 'テキスト' : annotation.tool === 'watermark' ? '透かし' : '描画'}${ids.size > 1 ? `（${ids.size}件）` : ''}を削除しました。「元に戻す」で復元できます。`);
+  selectedAnnotationId = null; selectedStrokeIds.clear(); selectedTextIds.clear(); refresh();
+  const label = { text: 'テキスト', watermark: '透かし', image: '画像' }[annotation.tool] ?? '描画';
+  status(`選択した${label}${ids.size > 1 ? `（${ids.size}件）` : ''}を削除しました。「元に戻す」で復元できます。`);
 }
 on('delete-text', deleteSelectedAnnotation);
 on('delete-stroke', deleteSelectedAnnotation);
+on('delete-image', deleteSelectedAnnotation);
+on('restore-image-aspect', () => {
+  const original = selectedAnnotation();
+  if (original?.tool !== 'image') return;
+  commitImageResize(model.activeId, original, restoreImageAspectRatio(original), '元の縦横比に戻しました。「元に戻す」で取り消せます。');
+});
+function commitImageResize(pageId, original, resized, message = '画像のサイズを変更しました。「元に戻す」で取り消せます。') {
+  if (resized === original) return;
+  model.update(new Set([pageId]), page => replaceAnnotation(page, original, resized));
+  paintTextPreview(); refreshAnnotationHandles(); refreshThumbnails(); updateControls();
+  status(message, 'success');
+}
 function moveSelectedAnnotation(dx, dy) {
   const original = selectedAnnotation();
   if (!original || !viewport) return;
@@ -1878,7 +1958,8 @@ function replaceStrokes(page, currents) {
 function positionAnnotationHandle(button, annotation) {
   const layout = annotation.tool === 'text'
     ? textLayout($('ink-canvas').getContext('2d'), annotation, viewport)
-    : annotation.tool === 'watermark' ? watermarkLayout($('ink-canvas').getContext('2d'), annotation, viewport) : strokeLayout(annotation, viewport);
+    : annotation.tool === 'watermark' ? watermarkLayout($('ink-canvas').getContext('2d'), annotation, viewport)
+      : annotation.tool === 'image' ? imageLayout(annotation, viewport) : strokeLayout(annotation, viewport);
   const scale = $('ink-canvas').getBoundingClientRect().width / viewport.width;
   const padding = annotation.tool === 'text' ? 0 : Math.max(0, (8 - Math.min(layout.width, layout.height) * scale) / 2);
   Object.assign(button.style, { left: `${layout.x * scale - padding}px`, top: `${layout.y * scale - padding}px`,
@@ -1907,6 +1988,14 @@ function positionTextTailHandle() {
   handle.style.left = `${x * scale}px`;
   handle.style.top = `${y * scale}px`;
 }
+function positionImageResizeHandles(annotation) {
+  const { cx, cy, left, right, top, bottom } = imageLayout(annotation, viewport);
+  const scale = $('ink-canvas').getBoundingClientRect().width / viewport.width;
+  // Leave room for the 24 px hit targets at each end and the midpoint of every edge.
+  const width = Math.max(48, (right - left) * scale), height = Math.max(48, (bottom - top) * scale);
+  Object.assign($('image-resize-handles').style, { left: `${cx * scale - width / 2}px`, top: `${cy * scale - height / 2}px`,
+    width: `${width}px`, height: `${height}px` });
+}
 function refreshAnnotationHandles() {
   if (!editorTab) {
     for (const handle of $('text-handles').querySelectorAll('.text-handle')) handle.remove();
@@ -1920,23 +2009,25 @@ function refreshAnnotationHandles() {
     const existing = handles.get(annotation.id);
     const button = existing || document.createElement('button');
     handles.delete(annotation.id);
-    const isText = annotation.tool === 'text';
+    const isText = annotation.tool === 'text', isImage = annotation.tool === 'image';
     const selected = annotation.id === selectedAnnotationId || (selectedStroke() && selectedStrokeIds.has(annotation.id))
       || (selectedText() && selectedTextIds.has(annotation.id));
-    button.type = 'button'; button.className = `text-handle${isText ? '' : ' stroke-handle'}${selected ? ' selected' : ''}`;
+    button.type = 'button'; button.className = `text-handle${isText || isImage ? '' : ' stroke-handle'}${selected ? ' selected' : ''}`;
     button.dataset.annotationId = annotation.id;
     if (isText) button.dataset.textId = annotation.id;
     const textAction = annotation.boxShape === 'bubble' ? '吹き出しを選択・移動' : 'テキストを移動';
-    button.setAttribute('aria-label', isText ? `${textAction}: ${annotation.text}` : annotation.tool === 'watermark' ? `透かしを選択・移動: ${annotation.text}` : '描画を選択・移動');
+    button.setAttribute('aria-label', isText ? `${textAction}: ${annotation.text}` : isImage ? '画像を選択・移動'
+      : annotation.tool === 'watermark' ? `透かしを選択・移動: ${annotation.text}` : '描画を選択・移動');
     button.setAttribute('aria-pressed', String(!!selected));
     button.title = 'クリックまたはF2で内容を編集。Ctrl+B/I/Uで太字・斜体・下線、Ctrl+↑/↓でサイズ変更、Ctrl+←/→で背景の不透明度を変更。ドラッグ・方向キーで移動、Deleteで削除。';
     if (annotation.boxShape === 'bubble') button.title = 'クリックで吹き出しを選択。選択後に本体をクリックするかF2で内容を編集。しっぽはドラッグで移動できます。';
     if (isText) button.title += ' Shift＋クリックで追加選択・解除。複数選択中はダブルクリックで個別編集。';
     if (!isText) button.title = 'クリックで選択。ドラッグで移動。方向キーで1pt、Shift＋方向キーで10pt移動。Deleteで削除。';
-    const isStroke = !isText && annotation.tool !== 'watermark';
+    if (isImage) button.title += ' 選択後は辺の中央をドラッグして幅・高さを調整、四隅をドラッグして縦横比を保ったまま拡大・縮小。';
+    const isStroke = !isText && !isImage && annotation.tool !== 'watermark';
     if (isStroke) button.title += ' Shift＋クリックで追加選択・解除。Ctrl＋↑／↓で太さ、Ctrl＋←／→で透明度を相対変更。Ctrl＋Shift＋↑／↓で描画を拡大・縮小。';
     if (annotation.tool === 'watermark') button.title += ' Ctrl＋←／→で不透明度を1%ずつ変更し、すぐ反映します。';
-    button.setAttribute('aria-keyshortcuts', `${isText ? 'F2 Control+b Control+i Control+u Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight ' : isStroke ? 'Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight Control+Shift+ArrowUp Control+Shift+ArrowDown ' : 'Control+ArrowLeft Control+ArrowRight '}Delete ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown`);
+    button.setAttribute('aria-keyshortcuts', `${isText ? 'F2 Control+b Control+i Control+u Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight ' : isStroke ? 'Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight Control+Shift+ArrowUp Control+Shift+ArrowDown ' : isImage ? '' : 'Control+ArrowLeft Control+ArrowRight '}Delete ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown`);
     positionAnnotationHandle(button, annotationPreview(annotation));
     if (existing) continue;
     const currentText = () => pageAnnotations().find(item => item.id === button.dataset.annotationId);
@@ -1993,11 +2084,11 @@ function canvasPoint(event) {
 function updateAnnotationDrag(event) {
   if (!annotationDrag || !viewport || event.pointerId !== annotationDrag.pointerId) return;
   const point = canvasPoint(event);
+  const dx = point[0] - annotationDrag.start[0], dy = point[1] - annotationDrag.start[1];
   const scale = $('ink-canvas').getBoundingClientRect().width / viewport.width;
-  if (!annotationDrag.moved && Math.hypot(point[0] - annotationDrag.start[0], point[1] - annotationDrag.start[1]) * scale < 4) return;
+  if (!annotationDrag.moved && Math.hypot(dx, dy) * scale < 4) return;
   annotationDrag.moved = true;
   if (annotationDrag.tailTip) {
-    const dx = point[0] - annotationDrag.start[0], dy = point[1] - annotationDrag.start[1];
     const [x, y] = annotationDrag.tailTip;
     const ctx = $('ink-canvas').getContext('2d');
     annotationDrag.current = Math.hypot(dx, dy) < 0.01 * viewport.scale ? annotationDrag.original
@@ -2005,26 +2096,30 @@ function updateAnnotationDrag(event) {
     paintTextPreview(); positionTextTailHandle(); return;
   }
   if (annotationDrag.originals) {
-    annotationDrag.currents = moveStrokesTogether(annotationDrag.originals, point[0] - annotationDrag.start[0], point[1] - annotationDrag.start[1]);
+    annotationDrag.currents = moveStrokesTogether(annotationDrag.originals, dx, dy);
     annotationDrag.current = annotationDrag.currents.find(item => item.id === annotationDrag.original.id);
     refreshAnnotationHandles();
     paintOverlay($('ink-canvas').getContext('2d'), replaceStrokes(model.active, annotationDrag.currents), viewport); return;
   }
-  annotationDrag.current = moveAnnotation(annotationDrag.original, point[0] - annotationDrag.start[0], point[1] - annotationDrag.start[1]);
-  positionAnnotationHandle(annotationDrag.button, annotationDrag.current);
+  const { original, resizeDirection, imageButton, button } = annotationDrag;
+  annotationDrag.current = resizeDirection ? resizeImageFromHandle(original, viewport, resizeDirection, dx, dy) : moveAnnotation(original, dx, dy);
+  positionAnnotationHandle(imageButton ?? button, annotationDrag.current);
+  if (original.tool === 'image') positionImageResizeHandles(annotationDrag.current);
   positionTextTailHandle();
   paintOverlay($('ink-canvas').getContext('2d'), replaceAnnotation(model.active, annotationDrag.original, annotationDrag.current), viewport);
 }
 function finishAnnotationDrag(event) {
   if (!annotationDrag || event.pointerId !== annotationDrag.pointerId) return;
   updateAnnotationDrag(event);
-  const { pageId, original, current, currents, button, pointerId, moved, tailTip, selectOnly } = annotationDrag; annotationDrag = null;
+  const { pageId, original, current, currents, button, pointerId, moved, tailTip, selectOnly, resizeDirection } = annotationDrag; annotationDrag = null;
   if (button.hasPointerCapture(pointerId)) button.releasePointerCapture(pointerId);
   if (tailTip) { commitTextTail(pageId, original, current); return; }
+  if (resizeDirection) { commitImageResize(pageId, original, current); return; }
   const [x, y] = original.points[0]; const [nextX, nextY] = current.points[0];
   if (Math.hypot(nextX - x, nextY - y) > 0.01) {
     model.update(new Set([pageId]), p => currents ? replaceStrokes(p, currents) : replaceAnnotation(p, original, current));
-    refreshThumbnails(); status(`${original.tool === 'text' ? 'テキスト' : '描画'}を移動しました。「元に戻す」で取り消せます。`, 'success');
+    const label = { text: 'テキスト', image: '画像', watermark: '透かし' }[original.tool] ?? '描画';
+    refreshThumbnails(); status(`${label}を移動しました。「元に戻す」で取り消せます。`, 'success');
     refreshAnnotationHandles();
   }
   // Preserve the DOM target for the browser's second click/dblclick event.
@@ -2061,6 +2156,24 @@ textTailHandle.addEventListener('pointermove', updateAnnotationDrag);
 textTailHandle.addEventListener('pointerup', finishAnnotationDrag);
 textTailHandle.addEventListener('pointercancel', cancelAnnotationDrag);
 textTailHandle.addEventListener('lostpointercapture', cancelAnnotationDrag);
+const imageResizeHandles = $('image-resize-handles');
+imageResizeHandles.addEventListener('pointerdown', event => {
+  if (imageResizeHandles.hidden || busy || stroke || annotationDrag || pageDrag || !viewport || event.button !== 0 || !event.isPrimary) return;
+  const button = event.target;
+  const { resizeX, resizeY } = button.dataset;
+  if (resizeX === undefined || resizeY === undefined) return;
+  const original = selectedAnnotation();
+  const imageButton = $('text-handles').querySelector('.text-handle.selected');
+  if (original?.tool !== 'image' || !imageButton) return;
+  event.preventDefault(); imageButton.focus({ preventScroll: true });
+  button.setPointerCapture(event.pointerId);
+  annotationDrag = { pageId: model.activeId, pointerId: event.pointerId, original, current: original,
+    resizeDirection: [Number(resizeX), Number(resizeY)], start: canvasPoint(event), button, imageButton };
+});
+imageResizeHandles.addEventListener('pointermove', updateAnnotationDrag);
+imageResizeHandles.addEventListener('pointerup', finishAnnotationDrag);
+imageResizeHandles.addEventListener('pointercancel', cancelAnnotationDrag);
+imageResizeHandles.addEventListener('lostpointercapture', cancelAnnotationDrag);
 function pdfPoint(event) {
   const rect = $('ink-canvas').getBoundingClientRect();
   const x = Math.max(0, Math.min(viewport.width, (event.clientX - rect.left) / rect.width * viewport.width));

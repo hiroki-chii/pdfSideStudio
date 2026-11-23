@@ -7,7 +7,7 @@ const signatures = {
   'image/webp': [0x52, 0x49, 0x46, 0x46, null, null, null, null, 0x57, 0x45, 0x42, 0x50],
 };
 
-export async function imageToPdf(bytes) {
+export async function encodeImage(bytes) {
   const type = Object.keys(signatures).find(key =>
     signatures[key].every((value, index) => value === null || bytes[index] === value));
   const unreadable = '画像を読み込めません。JPEG・PNG・WebP形式か、ファイルが破損していないか確認してください。';
@@ -20,22 +20,27 @@ export async function imageToPdf(bytes) {
     Math.sqrt(maxPixels / (bitmap.width * bitmap.height)));
   const width = Math.max(1, Math.floor(bitmap.width * scale));
   const height = Math.max(1, Math.floor(bitmap.height * scale));
-  const pageWidth = bitmap.width * scale * 0.75;
-  const pageHeight = bitmap.height * scale * 0.75;
-  let canvas, imageBytes;
+  const scaledWidth = bitmap.width * scale, scaledHeight = bitmap.height * scale;
+  let canvas;
   try {
     canvas = new globalThis.OffscreenCanvas(width, height);
     const context = canvas.getContext('2d');
     context.imageSmoothingQuality = 'high';
     context.drawImage(bitmap, 0, 0, width, height);
     const blob = await canvas.convertToBlob({ type: jpeg ? 'image/jpeg' : 'image/png', quality: 0.95 });
-    imageBytes = await blob.arrayBuffer();
+    return { blob, width: scaledWidth, height: scaledHeight };
   } finally {
     bitmap.close();
     if (canvas) canvas.width = canvas.height = 0;
   }
+}
+
+export async function imageToPdf(bytes) {
+  const { blob, width, height } = await encodeImage(bytes);
+  const pageWidth = width * 0.75, pageHeight = height * 0.75;
+  const imageBytes = await blob.arrayBuffer();
   const pdf = await PDFDocument.create();
-  const image = await (jpeg ? pdf.embedJpg(imageBytes) : pdf.embedPng(imageBytes));
+  const image = await (blob.type === 'image/jpeg' ? pdf.embedJpg(imageBytes) : pdf.embedPng(imageBytes));
   pdf.addPage([pageWidth, pageHeight]).drawImage(image, { x: 0, y: 0, width: pageWidth, height: pageHeight });
   return pdf.save();
 }

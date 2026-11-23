@@ -31,13 +31,13 @@ function setup(editorTab = false) {
     busy: false, stroke: null, annotationDrag: null, pageDrag: null, textEdit: null,
     selectedAnnotationId: null, activePreviewMenu: editorTab ? 'select' : 'rotation', previewMenuOpen: false,
     penEnabled: false, textEnabled: false, viewport: {}, previewZoom: 1, minPreviewZoom: 0.5, maxPreviewZoom: 4,
-    previewMenus: ['rotation', 'pen', 'stamp', 'watermark'], toolDescriptions: {},
+    previewMenus: ['rotation', 'pen', 'stamp', 'watermark', 'image'], toolDescriptions: {},
     selectedAnnotation: () => null, selectedText: () => null, selectedStroke: () => null,
     selectedTexts: () => [], selectedStrokes: () => [], positionTextTailHandle() {},
     resetPreviewMenu() { context.activePreviewMenu = editorTab ? 'select' : 'rotation'; },
     refreshThumbnails() {}, renderPreview() {}, revealActiveThumbnail() {}, updateEditorSidebarLayout() {},
   });
-  for (const name of ['pen', 'text', 'stamp', 'watermark', 'select']) {
+  for (const name of ['pen', 'text', 'stamp', 'watermark', 'select', 'image']) {
     $(`panel-${name}`).children.push($(`${name}-setting`));
   }
   $('rotation-scope').value = 'active';
@@ -53,7 +53,7 @@ test('side panel exposes only rotation settings across refresh, busy and empty s
     context.previewMenuOpen = true;
     context.activePreviewMenu = 'pen';
     context.refresh();
-    for (const name of ['select', 'pen', 'text', 'stamp', 'watermark']) {
+    for (const name of ['select', 'pen', 'text', 'stamp', 'watermark', 'image']) {
       assert.equal($(`open-${name}`).hidden, true);
       assert.equal($(`open-${name}`).disabled, true);
       assert.equal($(`panel-${name}`).hidden, true);
@@ -81,7 +81,7 @@ test('side panel exposes only rotation settings across refresh, busy and empty s
 test('the tab keeps all tools, split and print available', () => {
   const { $, context } = setup(true);
   context.refresh();
-  for (const name of ['select', 'pen', 'text', 'stamp', 'rotation', 'watermark']) {
+  for (const name of ['select', 'pen', 'text', 'stamp', 'rotation', 'watermark', 'image']) {
     assert.equal($(`open-${name}`).hidden, false);
     assert.equal($(`open-${name}`).disabled, false);
   }

@@ -64,6 +64,7 @@
                 <button id="open-select" class="preview-tool-button" type="button" aria-label="選択モード" aria-controls="panel-select" aria-pressed="true" title="選択・移動（Esc）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 10-7 1-3 7-4-18Z"/></svg><span>選択</span></button>
                 <button id="open-pen" class="preview-tool-button" type="button" aria-label="ペンの設定" aria-controls="panel-pen" aria-pressed="false" title="ペン・図形を描く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15l-1 6Z"/></svg><span>ペン</span></button>
                 <button id="open-text" class="preview-tool-button" type="button" aria-label="テキストボックスを配置" aria-controls="panel-text" aria-pressed="false" title="紙面をクリックしてテキストを配置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M12 5v15M8 20h8M4 5v3M20 5v3"/></svg><span>テキスト</span></button>
+                <button id="open-image" class="preview-tool-button editor-only" type="button" aria-label="画像メニュー" aria-controls="panel-image" aria-expanded="false" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m3 16 5-5 4 4 3-3 6 6"/><circle cx="16" cy="8" r="1"/></svg><span>画像</span></button>
                 <button id="open-stamp" class="preview-tool-button" type="button" aria-label="番号スタンプ" aria-controls="panel-stamp" aria-pressed="false" title="クリックするたびに番号が増えるスタンプ"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3 7 21M17 3l-2 18M3 9h18M2 15h18"/></svg><span>番号</span></button>
                 <button id="open-rotation" class="preview-tool-button" type="button" aria-label="ページを回転" aria-controls="panel-rotation" aria-pressed="false" title="ページの回転設定を開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 2 8M4 4v6h6"/></svg><span>回転</span></button>
                 <button id="open-watermark" class="preview-tool-button" type="button" aria-label="透かしの設定" aria-controls="panel-watermark" aria-pressed="false" title="透かしの設定を開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3s-7 8-7 12a7 7 0 0 0 14 0c0-4-7-12-7-12Z"/><path d="M8 15a4 4 0 0 0 4 4"/></svg><span>透かし</span></button>
@@ -73,9 +74,21 @@
             <div class="preview-menu-layer">
             <section id="panel-select" class="preview-menu" aria-labelledby="select-menu-title" hidden>
               <div class="preview-menu-heading"><h2 id="select-menu-title">オブジェクトを選択</h2><div class="menu-heading-actions"><button class="tool-help-button" type="button" data-tool-help="select" aria-label="選択の使い方" aria-haspopup="dialog" aria-controls="tool-help-dialog">使い方</button><button type="button" data-close-preview-menu="select" aria-label="メニューを閉じる">閉じる</button></div></div>
-              <p class="tool-hint">追加したテキスト・描画・透かしをクリックして選択します。</p>
+              <p class="tool-hint">追加したテキスト・描画・画像・透かしをクリックして選択します。</p>
               <div class="tool-settings"><fieldset class="tool-settings-group"><legend>選択と移動</legend><p class="subtle">ドラッグ・方向キーで移動、Deleteで削除できます。</p><p class="subtle">Shift＋クリックで同じ種類のテキストや描画を追加選択・解除できます。</p></fieldset></div>
               <p class="subtle">元のPDFの文字や画像は選択できません。</p>
+            </section>
+            <section id="panel-image" class="preview-menu editor-only" aria-labelledby="image-menu-title" hidden>
+              <div class="preview-menu-heading"><h2 id="image-menu-title">画像</h2></div>
+              <button id="add-overlay-image" class="full-button" type="button">画像を追加</button>
+              <input id="overlay-image-input" type="file" accept="image/jpeg,.jpg,.jpeg,image/png,.png,image/webp,.webp" hidden />
+              <div class="tool-settings" id="image-selection-settings" hidden>
+                <fieldset class="tool-settings-group"><legend>選択した画像</legend>
+                  <label class="tool-range" for="image-transparency"><span>透明度</span><output id="image-transparency-value" for="image-transparency">0%</output><input id="image-transparency" type="range" min="0" max="100" value="0" /></label>
+                  <button id="restore-image-aspect" class="full-button" type="button">元の縦横比に戻す</button>
+                  <button id="delete-image" class="full-button danger" type="button">画像を削除</button>
+                </fieldset>
+              </div>
             </section>
             <section id="panel-rotation" class="preview-menu" aria-labelledby="rotation-menu-title" hidden>
               <div class="preview-menu-heading"><h2 id="rotation-menu-title">ページを回転</h2><div class="menu-heading-actions"><button class="tool-help-button" type="button" data-tool-help="rotation" aria-label="回転の使い方" aria-haspopup="dialog" aria-controls="tool-help-dialog">使い方</button><button id="close-rotation" type="button">選択に戻る</button><button type="button" data-close-preview-menu="rotation" aria-label="メニューを閉じる">閉じる</button></div></div>
@@ -150,7 +163,20 @@
             </section>
             </div>
             <button id="previous" class="preview-nav preview-nav-previous" aria-label="前のページ" title="前のページ（←キー）" aria-keyshortcuts="ArrowLeft"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m14 6-6 6 6 6"/></svg></button>
-            <div id="preview-scroll" class="preview-scroll" tabindex="0" role="region" aria-label="プレビューのスクロール領域" title="Ctrl＋マウスホイールで拡大・縮小"><div class="preview-paper"><div id="canvas-stack" class="canvas-stack"><canvas id="pdf-canvas" aria-label="PDFプレビュー"></canvas><canvas id="ink-canvas" aria-label="ページへの書き込み領域"></canvas><div id="text-handles" aria-label="挿入したテキストと描画"><button id="text-tail-handle" type="button" aria-label="吹き出しのしっぽを移動" title="ドラッグまたは方向キーでしっぽを移動" aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown" hidden></button></div></div></div></div>
+            <div id="preview-scroll" class="preview-scroll" tabindex="0" role="region" aria-label="プレビューのスクロール領域" title="Ctrl＋マウスホイールで拡大・縮小">
+              <div class="preview-paper"><div id="canvas-stack" class="canvas-stack">
+                <canvas id="pdf-canvas" aria-label="PDFプレビュー"></canvas><canvas id="ink-canvas" aria-label="ページへの書き込み領域"></canvas>
+                <div id="text-handles" aria-label="挿入したオブジェクト">
+                  <button id="text-tail-handle" type="button" aria-label="吹き出しのしっぽを移動" title="ドラッグまたは方向キーでしっぽを移動" aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown" hidden></button>
+                  <div id="image-resize-handles" aria-hidden="true" hidden>
+                    <span data-resize-x="-1" data-resize-y="-1"></span><span data-resize-x="1" data-resize-y="-1"></span>
+                    <span data-resize-x="-1" data-resize-y="1"></span><span data-resize-x="1" data-resize-y="1"></span>
+                    <span data-resize-x="-1" data-resize-y="0"></span><span data-resize-x="1" data-resize-y="0"></span>
+                    <span data-resize-x="0" data-resize-y="-1"></span><span data-resize-x="0" data-resize-y="1"></span>
+                  </div>
+                </div>
+              </div></div>
+            </div>
             <button id="next" class="preview-nav preview-nav-next" aria-label="次のページ" title="次のページ（→キー）" aria-keyshortcuts="ArrowRight"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m10 6 6 6-6 6"/></svg></button>
             <div class="preview-zoom" role="group" aria-label="プレビューの拡大・縮小">
               <button id="zoom-out" type="button" aria-label="プレビューを縮小" title="縮小（最小50%）">−</button>

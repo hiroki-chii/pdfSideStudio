@@ -1,5 +1,6 @@
 import { imagePlacement, paintOverlay } from './pdf.js';
 import { PDF_LIMITS, PdfLimitError } from './limits.js';
+import { prepareOverlayImages } from './image-overlay.js';
 
 const makeCanvas = viewport => {
   const canvas = document.createElement('canvas');
@@ -16,6 +17,7 @@ async function rasterPage(record, source, renderPdf) {
   const view = page.getViewport({ scale: Math.min(2, PDF_LIMITS.rasterSide / Math.max(base.width, base.height)), rotation: record.rotation });
   const canvas = makeCanvas(view), overlay = renderPdf ? makeCanvas(view) : canvas;
   try {
+    await prepareOverlayImages(record);
     if (renderPdf) await page.render({ canvasContext: canvas.getContext('2d'), viewport: view }).promise;
     paintOverlay(overlay.getContext('2d'), record, view);
     if (renderPdf) canvas.getContext('2d').drawImage(overlay, 0, 0);

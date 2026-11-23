@@ -1,4 +1,5 @@
 import { paintOverlay } from './pdf.js';
+import { prepareOverlayImages } from './image-overlay.js';
 
 export function createFullscreenPreview({ root = document, getPreview,
   pixelRatio = () => window.devicePixelRatio || 1,
@@ -47,6 +48,7 @@ export function createFullscreenPreview({ root = document, getPreview,
       pdf.height = ink.height = Math.ceil(viewport.height);
       task = page.render({ canvasContext: pdf.getContext('2d'), viewport });
       await task.promise;
+      await prepareOverlayImages(current.record);
       if (currentVersion !== version || !dialog.open) return;
       paint(ink.getContext('2d'), current.record, viewport);
       paper.style.visibility = 'visible';

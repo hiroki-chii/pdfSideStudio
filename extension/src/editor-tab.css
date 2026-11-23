@@ -140,6 +140,8 @@
   box-shadow: none;
 }
 
+.editor-sidebar #panel-image { height: auto; }
+
 .editor-tab .page-list-section {
   grid-area: pages;
   display: flex;

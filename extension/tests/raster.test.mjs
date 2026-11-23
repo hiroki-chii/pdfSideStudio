@@ -7,6 +7,7 @@ import { createPageOverlay, createPrintPages } from '../src/raster.js';
 import { buildPdf } from '../src/pdf-export.js';
 import { moveTextTail, textLayout } from '../src/pdf.js';
 import { loadLimitedPdf } from '../src/pdf-security.js';
+import { createImageAnnotation, imageLayout, moveImage, prepareOverlayImages, resizeImageFromHandle, restoreImageAspectRatio } from '../src/image-overlay.js';
 
 const canvases = [];
 globalThis.document = { createElement(tag) {
@@ -100,6 +101,139 @@ test('raster service frees both canvases after rendering errors', async () => {
   }; } } }]]);
   await assert.rejects(createPrintPages([{ sourceId: 's', index: 0 }], sources), /render failed/);
   assert.ok(canvases.slice(start).every(canvas => canvas.requestedwidth === 0 && canvas.requestedheight === 0));
+});
+
+test('pasted images preserve their rotated bounds, intrinsic alpha and adjustable opacity in saved PDFs and print', async t => {
+  globalThis.createImageBitmap = async blob => loadImage(Buffer.from(await blob.arrayBuffer()));
+  t.after(() => { delete globalThis.createImageBitmap; });
+  const background = createCanvas(200, 300), backgroundContext = background.getContext('2d');
+  backgroundContext.fillStyle = '#0000ff';
+  backgroundContext.fillRect(0, 0, 200, 300);
+  const document = await PDFDocument.create();
+  document.addPage([200, 300]).drawImage(await document.embedPng(background.toBuffer('image/png')),
+    { x: 0, y: 0, width: 200, height: 300 });
+  const preview = await pdfjs.getDocument({ data: await document.save() }).promise;
+  t.after(() => preview.loadingTask.destroy());
+
+  const sticker = createCanvas(80, 40), stickerContext = sticker.getContext('2d');
+  stickerContext.fillStyle = '#ff0000';
+  stickerContext.fillRect(0, 0, 40, 40);
+  const blob = new Blob([sticker.toBuffer('image/png')], { type: 'image/png' });
+  const page = await preview.getPage(1);
+  const originalView = page.getViewport({ scale: 1, rotation: 0 });
+  const original = createImageAnnotation('sticker', { blob, width: 80, height: 40 }, originalView);
+  assert.deepEqual([original.width, original.height], [80, 40]);
+  const rotatedView = page.getViewport({ scale: 2, rotation: 90 });
+  const moved = moveImage(original, rotatedView, -1000, -1000);
+  const resized = resizeImageFromHandle(moved, rotatedView, [1, 1], 20, 40);
+  assert.deepEqual([resized.width, resized.height], [100, 50]);
+  const stretched = resizeImageFromHandle(resized, rotatedView, [1, 0], 40, 0);
+  assert.deepEqual([stretched.width, stretched.height], [100, 70]);
+  const layout = imageLayout(stretched, rotatedView);
+  assert.deepEqual([layout.left, layout.top, layout.angle], [0, 0, Math.PI / 2]);
+  const legacy = { ...stretched };
+  delete legacy.originalAspectRatio;
+  await prepareOverlayImages({ strokes: [legacy] });
+  const restored = restoreImageAspectRatio(legacy);
+  assert.deepEqual([restored.width, restored.height], [100, 50]);
+  assert.deepEqual(restored.points, legacy.points);
+
+  const sources = new Map([['s', { document, preview }]]);
+  const canvas = createCanvas(rotatedView.width, rotatedView.height), context = canvas.getContext('2d');
+  const checkPixels = expected => {
+    for (const x of [50, 125]) {
+      const pixel = [...context.getImageData(x, 50, 1, 1).data];
+      assert.ok(pixel.every((value, channel) => Math.abs(value - expected[channel]) <= 2), `${pixel} ≈ ${expected}`);
+    }
+    assert.deepEqual([...context.getImageData(50, 150, 1, 1).data], [0, 0, 255, 255]);
+    assert.deepEqual([...context.getImageData(150, 50, 1, 1).data], [0, 0, 255, 255]);
+  };
+  for (const [annotation, expected] of [[stretched, [255, 0, 0, 255]],
+    [{ ...stretched, opacity: 0.5 }, [128, 0, 128, 255]], [{ ...stretched, opacity: 0 }, [0, 0, 255, 255]]]) {
+    const record = structuredClone({ sourceId: 's', index: 0, rotation: 90, strokes: [annotation] });
+    const saved = await pdfjs.getDocument({ data: await buildPdf([record], sources, createPageOverlay) }).promise;
+    try {
+      const exported = await saved.getPage(1);
+      await exported.render({ canvasContext: context, viewport: exported.getViewport({ scale: 2 }) }).promise;
+      checkPixels(expected);
+    } finally { await saved.loadingTask.destroy(); }
+    const [printed] = await createPrintPages([record], sources);
+    context.drawImage(await loadImage(Buffer.from(await printed.blob.arrayBuffer())), 0, 0);
+    checkPixels(expected);
+  }
+});
+
+test('dragging any image corner keeps the opposite corner fixed across viewport rotations and zoom', async t => {
+  const document = await PDFDocument.create();
+  document.addPage([200, 300]);
+  const preview = await pdfjs.getDocument({ data: await document.save() }).promise;
+  t.after(() => preview.loadingTask.destroy());
+  const page = await preview.getPage(1);
+  const original = createImageAnnotation('sticker', { width: 80, height: 40 }, page.getViewport({ scale: 1 }));
+  const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-6, `${actual} ≈ ${expected}`);
+  for (const rotation of [0, 90, 180, 270]) {
+    for (const scale of [0.5, 2]) {
+      const view = page.getViewport({ scale, rotation });
+      const { left, top, right, bottom } = imageLayout(original, view);
+      for (const [x, y] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+        const corner = [x, y];
+        const dx = x * (right - left), dy = y * (bottom - top);
+        assert.equal(resizeImageFromHandle(original, view, corner, 0, 0), original);
+        for (const factor of [-10, -0.25, 0.25, 10]) {
+          const resized = resizeImageFromHandle(original, view, corner, dx * factor, dy * factor);
+          const bounds = imageLayout(resized, view);
+          close(x < 0 ? bounds.right : bounds.left, x < 0 ? right : left);
+          close(y < 0 ? bounds.bottom : bounds.top, y < 0 ? bottom : top);
+          close(resized.width / resized.height, original.width / original.height);
+          assert.ok(bounds.left >= -1e-6 && bounds.top >= -1e-6);
+          assert.ok(bounds.right <= view.width + 1e-6 && bounds.bottom <= view.height + 1e-6);
+          if (Math.abs(factor) < 1) close(resized.width, original.width * (1 + factor));
+          if (factor === -10) close(resized.width, 1);
+        }
+      }
+    }
+  }
+});
+
+test('dragging an image edge changes one dimension and keeps the opposite edge fixed across rotation and zoom', async t => {
+  const document = await PDFDocument.create();
+  document.addPage([200, 300]);
+  const preview = await pdfjs.getDocument({ data: await document.save() }).promise;
+  t.after(() => preview.loadingTask.destroy());
+  const page = await preview.getPage(1);
+  const original = createImageAnnotation('sticker', { width: 80, height: 40 }, page.getViewport({ scale: 1 }));
+  for (const rotation of [0, 90, 180, 270]) {
+    for (const scale of [0.5, 2]) {
+      const view = page.getViewport({ scale, rotation });
+      const { left, top, right, bottom } = imageLayout(original, view);
+      for (const direction of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+        const [x, y] = direction;
+        assert.equal(resizeImageFromHandle(original, view, direction, y * 50, x * 50), original);
+        const resized = imageLayout(resizeImageFromHandle(original, view, direction, x * 20 + y * 50, y * 20 + x * 50), view);
+        assert.deepEqual([resized.left, resized.top, resized.right, resized.bottom],
+          [left + Math.min(0, x) * 20, top + Math.min(0, y) * 20, right + Math.max(0, x) * 20, bottom + Math.max(0, y) * 20]);
+        const atPageEdge = imageLayout(resizeImageFromHandle(original, view, direction, x * 1000, y * 1000), view);
+        assert.deepEqual([atPageEdge.left, atPageEdge.top, atPageEdge.right, atPageEdge.bottom],
+          [x < 0 ? 0 : left, y < 0 ? 0 : top, x > 0 ? view.width : right, y > 0 ? view.height : bottom]);
+        const reduced = imageLayout(resizeImageFromHandle(original, view, direction, -x * 1000, -y * 1000), view);
+        assert.deepEqual([reduced.right - reduced.left, reduced.bottom - reduced.top],
+          [x ? scale : right - left, y ? scale : bottom - top]);
+      }
+    }
+  }
+});
+
+test('restoring image proportions fits the original ratio inside the current frame and preserves other image properties', () => {
+  const viewport = { width: 200, height: 300, scale: 1, rotation: 90, convertToPdfPoint: (x, y) => [x, y] };
+  const blob = new Blob();
+  const original = createImageAnnotation('sticker', { blob, width: 40.5, height: 20.25 }, viewport);
+  assert.equal(restoreImageAspectRatio(original), original);
+  for (const [width, height, expectedWidth, expectedHeight] of [[120, 40, 80, 40], [80, 60, 80, 40], [60, 40, 60, 30], [80, 30, 60, 30]]) {
+    const changed = { ...original, width, height, opacity: 0.4, points: [[87, 130]] };
+    const restored = restoreImageAspectRatio(changed);
+    assert.deepEqual(restored, { ...changed, width: expectedWidth, height: expectedHeight });
+    assert.equal(restoreImageAspectRatio(restored), restored);
+  }
 });
 
 test('bounded parser accepts standard PNG predictors, JPEG images and image masks', async () => {
