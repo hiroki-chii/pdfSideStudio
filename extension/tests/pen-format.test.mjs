@@ -14,7 +14,7 @@ const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
 const slice = (start, end) => app.slice(app.indexOf(start), app.indexOf(end));
 const script = [
   slice('function updateControls()', '\nfunction refresh()'),
-  slice('function enableSelection(', "\n$('open-select').addEventListener"),
+  slice('function enableSelection(', '\nfunction openPreviewMenu('),
   slice('function openPreviewMenu(', '\nfor (const name of previewMenus)'),
   slice('function selectedText()', '\nfunction textSettings()'),
   slice('function paintTextPreview()', '\nfunction positionTextEditor()'),
@@ -54,7 +54,7 @@ function setup(tool = 'pen', opacity = 0.75) {
     annotationFormatPreview: null, strokeFormatSession: null, textFormatSession: null, textEdit: null,
     textEnabled: false, penEnabled: false, activePreviewMenu: 'select', previewMenuOpen: false,
     stroke: null, annotationDrag: null, pageDrag: null,
-    previewMenus: ['rotation', 'pen', 'stamp', 'watermark'], previewZoom: 1, minPreviewZoom: 0.5, maxPreviewZoom: 4,
+    previewMenus: ['rotation', 'pen', 'stamp', 'watermark', 'image'], previewZoom: 1, minPreviewZoom: 0.5, maxPreviewZoom: 4,
     toolDescriptions: { 'open-text': 'テキスト', 'open-pen': 'ペン' },
     resetPreviewMenu() { context.activePreviewMenu = 'select'; },
     refreshThumbnails() {}, status() {},
@@ -142,7 +142,7 @@ test('the tab editor opens and highlights the selected object’s settings', () 
   vm.runInContext(slice('function enableTextInsertion()', "\n$('open-text').addEventListener"), context);
   const stamp = { ...text, id: 'stamp', text: '1', stampPattern: 'circle' };
   model.update(new Set([model.activeId]), page => ({ ...page, strokes: [...page.strokes, stamp] }));
-  const menus = ['select', 'pen', 'text', 'stamp', 'watermark', 'rotation'];
+  const menus = ['pen', 'text', 'stamp', 'watermark', 'rotation', 'image'];
   context.editorTab = true;
   for (const [annotation, menu] of [[original, 'pen'], [text, 'text'], [stamp, 'text']]) {
     context.selectAnnotation(annotation);
@@ -545,7 +545,7 @@ test('stroke selection loads styles, keeps history, and opens formatting from th
   assert.equal($('stroke-selection-actions').hidden, false);
   assert.equal($('open-pen').disabled, false);
   assert.equal($('open-pen').attributes['aria-pressed'], 'true');
-  for (const tool of ['select', 'text', 'rotation', 'watermark']) {
+  for (const tool of ['text', 'rotation', 'watermark', 'stamp', 'image']) {
     assert.equal($(`open-${tool}`).disabled, true);
     context.togglePreviewMenu(tool);
     assert.equal(context.selectedAnnotationId, original.id);
@@ -557,7 +557,7 @@ test('stroke selection loads styles, keeps history, and opens formatting from th
   assert.equal(context.penEnabled, false);
   assert.equal(model.past.length, history); assert.equal(model.future.length, 1);
   context.enableSelection();
-  for (const tool of ['select', 'pen', 'text', 'rotation', 'watermark']) assert.equal($(`open-${tool}`).disabled, false);
+  for (const tool of ['pen', 'text', 'rotation', 'watermark', 'stamp', 'image']) assert.equal($(`open-${tool}`).disabled, false);
 });
 
 test('stroke style inputs preview live, resize the selection bounds, and commit once per gesture', () => {

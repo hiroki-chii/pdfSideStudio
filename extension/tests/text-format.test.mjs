@@ -17,7 +17,7 @@ const script = [
   slice('function enableSelection(', '\nfunction togglePreviewMenu('),
   slice('function selectedText()', '\nfunction enableTextInsertion()'),
   slice('function enableTextInsertion()', "\n$('open-text').addEventListener"),
-  slice('function togglePreviewMenu(', "\n$('open-select').addEventListener"),
+  slice('function togglePreviewMenu(', '\nfunction openPreviewMenu('),
   slice('function focusSelectedAnnotation()', "\n$('update-text').addEventListener"),
   slice('function positionTextEditor()', '\n// Commit before toolbar/page/export'),
   slice('function textFormatRange()', '\nfunction deleteSelectedAnnotation()'),
@@ -73,7 +73,7 @@ function setup() {
     annotationFormatPreview: null, strokeFormatSession: null, textFormatSession: null, textEdit: null,
     textEnabled: false, textInsertionColor: '#222222', penEnabled: false, activePreviewMenu: 'text',
     previewMenuOpen: false, stroke: null, annotationDrag: null, pageDrag: null,
-    previewMenus: ['rotation', 'pen', 'watermark'], previewZoom: 1, minPreviewZoom: 0.5, maxPreviewZoom: 4,
+    previewMenus: ['rotation', 'pen', 'stamp', 'watermark', 'image'], previewZoom: 1, minPreviewZoom: 0.5, maxPreviewZoom: 4,
     toolDescriptions: { 'open-text': '配置' },
     selectedAnnotation: () => model.active?.strokes.find(item => item.id === context.selectedAnnotationId),
     selectedStroke: () => null,
@@ -164,6 +164,40 @@ test('the text icon opens formatting without losing selection or an active draft
   context.togglePreviewMenu('pen');
   assert.equal(context.penEnabled, false);
   assert.equal(context.textEdit, editing);
+});
+
+test('the header editing menu commits valid text and clears the selection when opened or closed', () => {
+  for (const collapsed of [false, true]) for (const valid of [false, true]) {
+    const { context, $, model, original } = setup();
+    const button = $('toggle-editor-sidebar');
+    button.setAttribute('aria-controls', 'editor-sidebar');
+    context.document.querySelectorAll = () => [button];
+    context.collapsedEditorSidebars = new Set(collapsed ? ['editor-sidebar'] : []);
+    context.updateEditorSidebarLayout = () => { assert.equal(context.textEdit, null); };
+    vm.runInContext(slice('function resetPreviewMenu()', '\nfunction enableSelection('), context);
+    vm.runInContext(slice("  for (const button of document.querySelectorAll('.editor-sidebar-toggle'))", '\n} else {'), context);
+
+    context.startTextEdit(original);
+    const { editor } = context.textEdit;
+    const history = model.past.length;
+    editor.value = valid ? '編集後のテキスト' : 'あ'.repeat(501);
+    editor.focused = false;
+    button.handlers.click();
+
+    assert.equal(context.collapsedEditorSidebars.has('editor-sidebar'), valid ? !collapsed : collapsed);
+    assert.equal(model.past.length, history + Number(valid));
+    assert.equal(model.active.strokes[0].text, valid ? editor.value : original.text);
+    assert.equal(context.selectedAnnotationId, valid ? null : original.id);
+    assert.equal(context.previewMenuOpen, !valid);
+    if (valid) {
+      assert.equal(context.textEdit, null);
+      assert.equal(context.activePreviewMenu, 'select');
+      assert.equal(context.selectedTextIds.size, 0);
+    } else {
+      assert.equal(context.textEdit.editor, editor);
+      assert.equal(editor.focused, true);
+    }
+  }
 });
 
 test('Escape commits existing and new text edits, retains formatting and focuses the move handle', () => {
@@ -856,11 +890,11 @@ test('selected-range size reduction can recover text that is too large for the p
 test('text selection and editing disable other toolbar tools, and deselection restores them', () => {
   const { context, $, original } = setup();
   context.document.querySelectorAll = selector => selector === 'button, input, select, textarea'
-    ? ['select', 'pen', 'text', 'rotation', 'watermark'].map(name => $(`open-${name}`)) : [];
+    ? ['text', ...context.previewMenus].map(name => $(`open-${name}`)) : [];
   vm.runInContext(slice('function updateControls()', '\nfunction refresh()'), context);
   const assertTools = locked => {
     context.updateControls();
-    for (const name of ['select', 'pen', 'rotation', 'watermark']) assert.equal($(`open-${name}`).disabled, locked);
+    for (const name of context.previewMenus) assert.equal($(`open-${name}`).disabled, locked);
     assert.equal($('open-text').disabled, false);
   };
   assertTools(true);

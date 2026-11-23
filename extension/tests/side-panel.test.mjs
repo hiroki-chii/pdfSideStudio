@@ -37,7 +37,7 @@ function setup(editorTab = false) {
     resetPreviewMenu() { context.activePreviewMenu = editorTab ? 'select' : 'rotation'; },
     refreshThumbnails() {}, renderPreview() {}, revealActiveThumbnail() {}, updateEditorSidebarLayout() {},
   });
-  for (const name of ['pen', 'text', 'stamp', 'watermark', 'select', 'image']) {
+  for (const name of ['pen', 'text', 'stamp', 'watermark', 'image']) {
     $(`panel-${name}`).children.push($(`${name}-setting`));
   }
   $('rotation-scope').value = 'active';
@@ -53,7 +53,7 @@ test('side panel exposes only rotation settings across refresh, busy and empty s
     context.previewMenuOpen = true;
     context.activePreviewMenu = 'pen';
     context.refresh();
-    for (const name of ['select', 'pen', 'text', 'stamp', 'watermark', 'image']) {
+    for (const name of ['pen', 'text', 'stamp', 'watermark', 'image']) {
       assert.equal($(`open-${name}`).hidden, true);
       assert.equal($(`open-${name}`).disabled, true);
       assert.equal($(`panel-${name}`).hidden, true);
@@ -81,7 +81,7 @@ test('side panel exposes only rotation settings across refresh, busy and empty s
 test('the tab keeps all tools, split and print available', () => {
   const { $, context } = setup(true);
   context.refresh();
-  for (const name of ['select', 'pen', 'text', 'stamp', 'rotation', 'watermark', 'image']) {
+  for (const name of ['pen', 'text', 'stamp', 'rotation', 'watermark', 'image']) {
     assert.equal($(`open-${name}`).hidden, false);
     assert.equal($(`open-${name}`).disabled, false);
   }
@@ -107,11 +107,11 @@ test('side panel blocks annotation tools and removes annotation handles', () => 
   const { $, model, context } = setup();
   const before = model.sessionSnapshot();
   vm.runInContext([
-    slice('function togglePreviewMenu(', "\n$('open-select').addEventListener"),
+    slice('function togglePreviewMenu(', '\nfunction openPreviewMenu('),
     slice('function openPreviewMenu(', '\nfor (const name of previewMenus)'),
     slice('function refreshAnnotationHandles()', '\nfunction pdfPoint('),
   ].join('\n'), context);
-  for (const name of ['select', 'pen', 'text', 'stamp', 'watermark']) {
+  for (const name of ['pen', 'text', 'stamp', 'watermark']) {
     context.togglePreviewMenu(name); context.openPreviewMenu(name);
   }
   const tailHandle = $('text-tail-handle');

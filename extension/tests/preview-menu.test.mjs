@@ -5,9 +5,9 @@ import vm from 'node:vm';
 
 const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-const menuNames = ['select', 'rotation', 'pen', 'stamp', 'watermark', 'text'];
+const menuNames = ['rotation', 'pen', 'stamp', 'watermark', 'text'];
 const toggleScript = app.slice(app.indexOf('function togglePreviewMenu('),
-  app.indexOf("\n$('open-select').addEventListener"));
+  app.indexOf('\nfunction openPreviewMenu('));
 const closeButtonScript = app.slice(app.indexOf("for (const button of document.querySelectorAll('[data-close-preview-menu]'))"),
   app.indexOf("\n$('start-pen').addEventListener"));
 const dismissalScript = app.slice(app.indexOf("document.addEventListener('pointerdown', event => {"),
@@ -86,7 +86,7 @@ function setupCloseButton(tool) {
   return { ...env, button };
 }
 
-test('all six close buttons hide their menu and return focus to its tool', () => {
+test('menu close buttons hide their menu and return focus to its tool', () => {
   for (const tool of menuNames) {
     const { context, $, calls, button } = setupCloseButton(tool);
     button.handlers.click();
@@ -160,6 +160,52 @@ test('outside blank clicks commit active text before deselecting, but preserve i
     assert.equal(!!context.textEdit, invalidText);
     assert.equal(event.stopped, invalidText ? true : undefined);
   }
+});
+
+test('the toolbar omits selection and empty paper exits settings-only tools', () => {
+  assert.doesNotMatch(html, /id="(?:open-select|panel-select)"/);
+  for (const tool of ['rotation', 'watermark', 'image']) {
+    const { context, pointerdown } = selectedSetup(tool);
+    context.selectedAnnotationId = null;
+    pointerdown();
+    assert.equal(context.activePreviewMenu, 'select');
+    assert.equal(context.previewMenuOpen, false);
+  }
+});
+
+test('blank space outside the paper exits placement modes while paper clicks place objects', () => {
+  for (const tool of ['text', 'stamp']) for (const target of ['blank', 'outside']) {
+    const { context, calls, pointerdown } = selectedSetup(tool);
+    context.selectedAnnotationId = null;
+    pointerdown();
+    assert.ok(calls.includes(`place-${tool}`));
+    assert.equal(context.activePreviewMenu, tool);
+    pointerdown({ target: 'settings' });
+    assert.equal(context.activePreviewMenu, tool);
+    pointerdown({ target });
+    assert.equal(context.activePreviewMenu, 'select');
+    assert.equal(context.textEnabled, false);
+    assert.equal(context.previewMenuOpen, false);
+    assert.equal(calls.filter(call => call === `place-${tool}`).length, 1);
+  }
+});
+
+test('a pen click exits drawing without a stroke and a drag continues drawing', () => {
+  const { context, $, calls, pointerdown } = selectedSetup('pen');
+  context.selectedAnnotationId = null;
+  const handlers = $('ink-canvas').handlers;
+  const drag = pointerdown();
+  handlers.pointermove({ ...drag, clientX: 40 });
+  handlers.pointerup({ ...drag, type: 'pointerup' });
+  assert.equal(context.penEnabled, true);
+  assert.equal(calls.filter(call => call === 'save-stroke').length, 1);
+
+  const click = pointerdown();
+  handlers.pointerup({ ...click, type: 'pointerup', clientX: click.clientX + 1 });
+  assert.equal(context.penEnabled, false);
+  assert.equal(context.activePreviewMenu, 'select');
+  assert.equal(context.previewMenuOpen, false);
+  assert.equal(calls.filter(call => call === 'save-stroke').length, 1);
 });
 
 test('settings, controls, object clicks and non-editing gestures do not clear selection', () => {

@@ -49,6 +49,7 @@ if (editorTab) {
     button.addEventListener('click', () => {
       if (busy || stroke || annotationDrag || pageDrag) return;
       const panel = button.getAttribute('aria-controls');
+      if (panel === 'editor-sidebar' && textEdit && !enableSelection()) return;
       if (!collapsedEditorSidebars.delete(panel)) collapsedEditorSidebars.add(panel);
       updateEditorSidebarLayout(model.pages.length > 0, model.past.length > 0 || model.future.length > 0);
       if (panel === 'page-list-section') revealActiveThumbnail();
@@ -116,11 +117,10 @@ const previewMenus = ['rotation', 'pen', 'stamp', 'watermark', 'image'];
 let activePreviewMenu = editorTab ? 'select' : 'rotation';
 let previewMenuOpen = false;
 const toolDescriptions = {
-  'open-select': '追加した文字・描画・画像をクリックして選択。ドラッグで移動、Deleteで削除。Escで選択モードに戻ります。',
-  'open-pen': '色・太さ・透明度を設定して紙面をドラッグ。「選択」またはEscで選択モードに戻ります。',
-  'open-text': '紙面をクリックしてテキストを1つ追加。「入力を確定」で選択モードに戻ります。配置前のEscで終了。',
+  'open-pen': '色・太さ・透明度を設定して紙面をドラッグ。クリックまたはEscで選択モードに戻ります。',
+  'open-text': '紙面をクリックしてテキストを1つ追加。配置前は紙面の外の空白またはEscで終了できます。',
   'open-image': '画像を追加するメニューを開きます。選択した画像の透明度も調整できます。',
-  'open-stamp': '紙面をクリックするたびに番号を配置し、次の番号を1つ増やします。Escで選択モードに戻ります。',
+  'open-stamp': '紙面をクリックするたびに番号を配置します。紙面の外の空白またはEscで選択モードに戻ります。',
   'open-rotation': '対象ページを選び、方向ボタンまたはCtrl＋←／→で左右90度ずつ回転。「元に戻す」で取り消せます。',
   'open-watermark': 'テキスト・色・文字サイズ・位置を選んで、全ページの最前面に透かしを適用します。',
 };
@@ -181,11 +181,6 @@ function updateControls() {
   const selectedMenu = strokeSelected ? 'pen' : textEnabled || textSelected ? 'text'
     : selected?.tool === 'image' ? 'image' : activePreviewMenu;
   const visibleMenu = previewMenuOpen ? selectedMenu : null;
-  $('open-select').disabled = busy || !model.active;
-  $('open-select').setAttribute('aria-pressed', String(selectedMenu === 'select'));
-  $('open-select').setAttribute('aria-controls', 'panel-select');
-  $('open-select').setAttribute('aria-expanded', String(visibleMenu === 'select' && !!model.active));
-  $('panel-select').hidden = !model.active || visibleMenu !== 'select';
   const selectedImage = selected?.tool === 'image' ? annotationPreview(selected) : null;
   $('add-overlay-image').disabled = busy || !viewport || !model.active;
   $('image-selection-settings').hidden = !selectedImage;
@@ -217,7 +212,7 @@ function updateControls() {
   $('pen-mode-hint').textContent = selectedStroke()
     ? strokeCount > 1 ? '太さ・透明度は各描画の元の値に同じ差分を適用します。スライダーの数値は最後に選んだ描画の値です。色は選択全体に適用します。'
       : '色・太さ・透明度は選択した描画だけにすぐ反映されます。Shift＋クリックで描画を追加選択できます。'
-    : '紙面をドラッグして描きます。「選択」またはEscで選択モードに戻ります。';
+    : '紙面をドラッグして描きます。クリックまたはEscで選択モードに戻ります。';
   $('text-menu-title').textContent = textEdit ? 'テキストを入力中' : textCount > 1 ? `選択したテキスト（${textCount}件）` : selectedText() ? '選択したテキスト' : 'テキストを配置';
   $('text-mode-hint').textContent = textEdit ? '文字書式は選択範囲に、背景はボックス全体に適用します。'
     : textCount > 1 ? `選択した${textCount}件に一括適用。サイズは差を保ち、8〜96ptの最初の境界で全体が止まります。`
@@ -253,13 +248,9 @@ function updateControls() {
   for (const name of previewMenus) {
     const open = visibleMenu === name && !!model.active;
     $(`panel-${name}`).hidden = !open;
-    $(`open-${name}`).disabled = busy || !model.pages.length;
+    $(`open-${name}`).disabled = busy || !model.pages.length || textSelected || (name !== 'pen' && strokeSelected);
     $(`open-${name}`).setAttribute('aria-expanded', String(open));
     $(`open-${name}`).setAttribute('aria-pressed', String(selectedMenu === name));
-  }
-  for (const name of ['select', ...previewMenus]) {
-    $(`open-${name}`).disabled ||= textSelected;
-    if (name !== 'pen') $(`open-${name}`).disabled ||= strokeSelected;
   }
   $('open-pen').setAttribute('aria-label', strokeSelected ? '描画の書式設定' : 'ペン');
   $('open-pen').title = strokeSelected ? '選択した描画の書式設定を開く・閉じる' : toolDescriptions['open-pen'];
@@ -268,7 +259,7 @@ function updateControls() {
     button.classList.toggle('reorderable', !busy && model.pages.length > 1);
   });
   if (!editorTab) {
-    for (const name of ['select', 'pen', 'text', 'stamp', 'watermark', 'image']) {
+    for (const name of ['pen', 'text', 'stamp', 'watermark', 'image']) {
       $(`open-${name}`).hidden = true;
       $(`open-${name}`).disabled = true;
       $(`panel-${name}`).hidden = true;
@@ -1244,12 +1235,13 @@ function resetPreviewMenu() {
   activePreviewMenu = editorTab ? 'select' : 'rotation';
   $('rotation-scope').value = 'active';
 }
-function enableSelection(showMenu = false) {
-  if (busy || stroke || annotationDrag || pageDrag || !finishTextEdit()) return;
-  previewMenuOpen = showMenu;
+function enableSelection() {
+  if (busy || stroke || annotationDrag || pageDrag || !finishTextEdit()) return false;
+  previewMenuOpen = false;
   penEnabled = false; textEnabled = false; selectedAnnotationId = null;
   selectedStrokeIds.clear(); selectedTextIds.clear();
   resetPreviewMenu(); refreshAnnotationHandles(); updateControls();
+  return true;
 }
 function togglePreviewMenu(name) {
   if (!editorTab) return;
@@ -1259,14 +1251,12 @@ function togglePreviewMenu(name) {
   if (previewMenuOpen && !$(`panel-${name}`).hidden) {
     previewMenuOpen = false; updateControls(); return;
   }
-  if (name === 'select') enableSelection(true);
-  else if ((name === 'pen' && selectedStroke()) || (name === 'image' && selectedAnnotation()?.tool === 'image')) {
+  if ((name === 'pen' && selectedStroke()) || (name === 'image' && selectedAnnotation()?.tool === 'image')) {
     previewMenuOpen = true; updateControls();
   }
   else if (name === 'text') enableTextInsertion();
   else openPreviewMenu(name);
 }
-$('open-select').addEventListener('click', () => togglePreviewMenu('select'));
 function openPreviewMenu(name) {
   if (!editorTab) return;
   if (busy || stroke || annotationDrag || pageDrag || !model.active) return;
@@ -1289,8 +1279,7 @@ function openPreviewMenu(name) {
 for (const name of previewMenus) {
   $(`open-${name}`).addEventListener('click', () => togglePreviewMenu(name));
   $(`close-${name}`)?.addEventListener('click', () => {
-    enableSelection();
-    $('open-select').focus({ preventScroll: true });
+    if (enableSelection()) $('preview-scroll').focus({ preventScroll: true });
   });
 }
 for (const button of document.querySelectorAll('[data-close-preview-menu]')) {
@@ -1458,8 +1447,7 @@ function enableTextInsertion() {
 }
 $('open-text').addEventListener('click', () => togglePreviewMenu('text'));
 $('close-text').addEventListener('click', () => {
-  enableSelection();
-  $('open-select').focus({ preventScroll: true });
+  if (enableSelection()) $('preview-scroll').focus({ preventScroll: true });
 });
 $('confirm-text').addEventListener('click', () => {
   if (finishTextEdit()) focusSelectedAnnotation();
@@ -1469,7 +1457,7 @@ $('cancel-text').addEventListener('click', () => {
 });
 function focusSelectedAnnotation() {
   const handle = [...$('text-handles').querySelectorAll('button')].find(button => button.dataset.annotationId === selectedAnnotationId);
-  (handle || $('open-select')).focus({ preventScroll: true });
+  (handle || $('preview-scroll')).focus({ preventScroll: true });
 }
 $('update-text').addEventListener('click', () => {
   if (!busy && selectedTexts().length === 1 && viewport) startTextEdit(selectedText());
@@ -1617,9 +1605,9 @@ function finishTextEdit(cancel = false) {
 // Commit before toolbar/page/export actions so they always see the latest text.
 document.addEventListener('pointerdown', event => {
   if (event.target.closest('[data-tool-help], #tool-help-dialog')) return;
-  // Blank space outside the paper also clears selection, while controls remain usable.
+  // Blank editor space outside the paper also ends click-to-place tools.
   if (event.button === 0 && event.isPrimary && !busy && !stroke && !annotationDrag && !pageDrag
-    && (selectedAnnotationId || textEdit)
+    && (selectedAnnotationId || textEdit || (editorTab && activePreviewMenu !== 'select'))
     && !event.target.closest('.canvas-stack, .preview-menu, button, input, select, textarea, a, label, summary, dialog, [contenteditable]')) {
     finishAnnotationFormatting();
     enableSelection();
@@ -2278,8 +2266,8 @@ $('ink-canvas').addEventListener('pointerdown', event => {
     try { placeNumberStamp(event); } catch (error) { fail(error); }
     return;
   }
-  if (!textEnabled && !penEnabled && !busy && !annotationDrag && !stroke) {
-    if (activePreviewMenu === 'select' || selectedAnnotationId) enableSelection();
+  if (!textEnabled && !penEnabled) {
+    enableSelection();
     return;
   }
   if (textEnabled && !busy && viewport && model.active && event.button === 0 && event.isPrimary && !annotationDrag) {
@@ -2295,10 +2283,12 @@ $('ink-canvas').addEventListener('pointerdown', event => {
   selectedAnnotationId = null; refreshAnnotationHandles(); updateControls();
   event.preventDefault(); $('ink-canvas').setPointerCapture(event.pointerId);
   stroke = { id: uid(), tool: $('pen-tool').value, color: $('pen-color').value, width: Number($('pen-width').value),
-    opacity: 1 - Number($('pen-transparency').value) / 100, points: [pdfPoint(event)], pointerId: event.pointerId };
-  paintOverlay($('ink-canvas').getContext('2d'), { ...model.active, strokes: [...model.active.strokes, stroke] }, viewport);
+    opacity: 1 - Number($('pen-transparency').value) / 100, points: [pdfPoint(event)], pointerId: event.pointerId,
+    startX: event.clientX, startY: event.clientY, moved: false };
 });
 function updateStroke(event) {
+  if (!stroke.moved && Math.hypot(event.clientX - stroke.startX, event.clientY - stroke.startY) < 4) return;
+  stroke.moved = true;
   if (stroke.tool === 'pen') {
     const events = event.getCoalescedEvents?.();
     for (const item of events?.length ? events : [event]) stroke.points.push(pdfPoint(item));
@@ -2321,7 +2311,11 @@ $('ink-canvas').addEventListener('pointermove', event => {
 function finishStroke(event) {
   if (!stroke || event.pointerId !== stroke.pointerId) return;
   if (event.type === 'pointerup' && viewport) updateStroke(event);
-  const { pointerId, ...saved } = stroke; stroke = null;
+  const { pointerId, startX, startY, moved, ...saved } = stroke; stroke = null;
+  if (!moved) {
+    if (event.type === 'pointerup') enableSelection();
+    return;
+  }
   model.update(new Set([model.activeId]), p => ({ ...p, strokes: [...p.strokes, saved] }));
   refreshThumbnails(); refreshAnnotationHandles(); updateControls(); status('書き込みを追加しました。', 'success');
 }
@@ -2353,8 +2347,7 @@ document.addEventListener('keydown', event => {
       if ($('ink-canvas').hasPointerCapture(pointerId)) $('ink-canvas').releasePointerCapture(pointerId);
       paintTextPreview();
     }
-    enableSelection();
-    $('open-select').focus({ preventScroll: true });
+    if (enableSelection()) $('preview-scroll').focus({ preventScroll: true });
     return;
   }
   if (event.target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])') || $('help-dialog').open || $('tool-help-dialog').open || $('save-dialog').open || busy || event.defaultPrevented || event.isComposing) return;
