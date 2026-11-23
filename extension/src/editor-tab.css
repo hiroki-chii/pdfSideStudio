@@ -175,6 +175,32 @@
 }
 
 .editor-tab .page-card { flex: none; }
+.editor-tab .page-button {
+  display: grid;
+  grid-template: minmax(0, 1fr) auto / minmax(0, 1fr);
+  place-items: center;
+  gap: 3px;
+  padding: 5px 5px 8px;
+}
+.editor-tab .page-card.active .page-button { padding: 4px 4px 7px; }
+.editor-tab .page-button :is(canvas, .thumb-placeholder) { max-width: 100%; max-height: 100%; }
+.editor-tab .page-number {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  min-width: 18px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: var(--surface);
+  font-weight: 650;
+}
+.editor-tab .page-source-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editor-tab .page-card-actions { inset-block-start: 24px; }
 .editor-tab .page-card.drop-before::before,
 .editor-tab .page-card.drop-after::after {
   inset: auto 0;
@@ -257,9 +283,8 @@
   .editor-tab .page-list-section { padding: 6px 4px 0; }
   .editor-tab #page-list-title { font-size: 11px; }
   .editor-tab .page-list-section .count { margin-left: 2px; padding-inline: 3px; }
-  .editor-tab .page-card-actions { inset-inline: 0; gap: 2px; grid-template-columns: repeat(2, 19px); }
-  .editor-tab .page-card-actions .page-card-action { width: 19px; height: 24px; }
-  .editor-tab .page-button canvas { max-width: 100%; }
+  .editor-tab .page-card-actions { inset-inline: 0; gap: 2px; grid-template-columns: repeat(2, minmax(0, 19px)); }
+  .editor-tab .page-card-actions .page-card-action { width: 100%; height: 24px; }
   .editor-tab .preview-section .preview-area { padding: 0 0 78px; }
   .editor-tab .preview-area .preview-nav { bottom: 78px; }
   .editor-tab .preview-zoom { left: 4px; max-width: calc(100% - 8px); flex-wrap: wrap; gap: 2px; }

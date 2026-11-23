@@ -401,7 +401,7 @@ function refreshThumbnails() {
     button.setAttribute('aria-label', `${index + 1}ページを表示。PDF ${source.number}、${source.name}の元ページ${page.index + 1}`);
     button.setAttribute('aria-current', page.id === model.activeId ? 'page' : 'false');
     const placeholder = document.createElement('span'); placeholder.className = 'thumb-placeholder'; placeholder.textContent = '▤';
-    const label = document.createElement('span'); label.textContent = index + 1;
+    const label = document.createElement('span'); label.className = 'page-number'; label.textContent = index + 1;
     const sourceLabel = document.createElement('span'); sourceLabel.className = 'page-source-label'; sourceLabel.textContent = `PDF ${source.number}`;
     button.append(placeholder, label, sourceLabel);
     let suppressClick = false;
@@ -546,6 +546,7 @@ function dropPage(event) {
 async function pumpThumbnails() {
   if (thumbRunning) return;
   thumbRunning = true;
+  const maxThumbnailWidth = editorTab ? 160 : 104;
   try {
     while (thumbQueue.length) {
       const { record, button } = thumbQueue.shift();
@@ -555,7 +556,7 @@ async function pumpThumbnails() {
         if (!cached) {
           const page = await sources.get(record.sourceId).preview.getPage(record.index + 1);
           const initial = page.getViewport({ scale: 1, rotation: record.rotation });
-          const view = page.getViewport({ scale: Math.min(104 / initial.width, 130 / initial.height), rotation: record.rotation });
+          const view = page.getViewport({ scale: Math.min(maxThumbnailWidth / initial.width, 130 / initial.height), rotation: record.rotation });
           const canvas = document.createElement('canvas'); canvas.width = Math.ceil(view.width); canvas.height = Math.ceil(view.height);
           const ctx = canvas.getContext('2d');
           await page.render({ canvasContext: ctx, viewport: view }).promise;
