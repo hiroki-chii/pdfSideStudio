@@ -5,34 +5,43 @@ import { PDFDocument, PDFName, PDFNumber, degrees, rgb } from 'pdf-lib';
 import { createCanvas } from '@napi-rs/canvas';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { EditorModel, MAX_PAGES, normalizeRotation, safeFilename } from '../src/model.js';
-import { buildPdf, imagePlacement, paintOverlay, textLayout, moveText, strokeLayout, moveStroke, scaleStrokes, watermarkLayout, moveWatermark } from '../src/pdf.js';
+import { buildPdf, imagePlacement, paintOverlay, textLayout, moveText, strokeLayout, moveStroke, scaleStrokes, watermarkLayout } from '../src/pdf.js';
 
-test('watermark movement follows viewport directions, clamps bounds and restores through history', async () => {
+test('nine watermark positions follow the displayed page at each rotation and keep the chosen size', async t => {
   const ctx = createCanvas(600, 800).getContext('2d');
-  const doc = await PDFDocument.create(); doc.addPage([600, 800]);
+  const doc = await PDFDocument.create(); doc.addPage([600, 800]); doc.addPage([30, 38]);
   const preview = await pdfjs.getDocument({ data: await doc.save() }).promise;
+  t.after(() => preview.loadingTask.destroy());
   const page = await preview.getPage(1);
+  const positions = [
+    ['top-left', -1, -1], ['top-center', 0, -1], ['top-right', 1, -1],
+    ['middle-left', -1, 0], ['center', 0, 0], ['middle-right', 1, 0],
+    ['bottom-left', -1, 1], ['bottom-center', 0, 1], ['bottom-right', 1, 1],
+  ];
+  const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} ≈ ${expected}`);
   for (const rotation of [0, 90, 180, 270]) {
-    const viewport = page.getViewport({ scale: 1.5, rotation });
-    const original = { text: 'DRAFT', color: '#736c90', opacity: 0.2 };
-    const before = watermarkLayout(ctx, original, viewport);
-    const moved = moveWatermark(ctx, original, viewport, 25, 40);
-    const after = watermarkLayout(ctx, moved, viewport);
-    assert.ok(Math.abs(after.cx - before.cx - 25) < 1e-8);
-    assert.ok(Math.abs(after.cy - before.cy - 40) < 1e-8);
-    assert.equal(original.points, undefined);
-    const edge = watermarkLayout(ctx, moveWatermark(ctx, moved, viewport, 10000, -10000), viewport);
-    assert.ok(edge.left >= -1e-8 && edge.right <= viewport.width + 1e-8);
-    assert.ok(edge.top >= -1e-8 && edge.bottom <= viewport.height + 1e-8);
-    const model = new EditorModel();
-    model.commit([{ id: 'page', strokes: [], watermark: original }]);
-    model.update(new Set(['page']), p => ({ ...p, watermark: moved }));
-    model.undo(); assert.deepEqual(model.active.watermark, original);
-    model.redo(); assert.deepEqual(model.active.watermark, moved);
-    model.update(new Set(['page']), p => ({ ...p, watermark: null }));
-    model.undo(); assert.deepEqual(model.active.watermark, moved);
+    for (const scale of [0.5, 2]) {
+      const viewport = page.getViewport({ scale, rotation });
+      for (const [position, horizontal, vertical] of positions) {
+        const layout = watermarkLayout(ctx, { text: 'DRAFT', position, fontSize: 64 }, viewport);
+        close(layout.size, 64 * scale);
+        close(horizontal === -1 ? layout.left : horizontal === 1 ? layout.right : layout.cx,
+          horizontal === -1 ? 18 * scale : horizontal === 1 ? viewport.width - 18 * scale : viewport.width / 2);
+        close(vertical === -1 ? layout.top : vertical === 1 ? layout.bottom : layout.cy,
+          vertical === -1 ? 18 * scale : vertical === 1 ? viewport.height - 18 * scale : viewport.height / 2);
+      }
+    }
   }
-  await preview.loadingTask.destroy();
+  const small = (await preview.getPage(2)).getViewport({ scale: 1 });
+  const long = { text: 'DRAFT'.repeat(16), position: 'bottom-right', fontSize: 64 };
+  const layout = watermarkLayout(ctx, long, small);
+  assert.ok(layout.left >= 0 && layout.right <= small.width && layout.top >= 0 && layout.bottom <= small.height);
+  const standard = watermarkLayout(ctx, long, page.getViewport({ scale: 1 }));
+  assert.equal(standard.size, 64);
+  assert.ok(standard.horizontalScale < 1);
+  const legacy = watermarkLayout(ctx, { text: 'DRAFT', points: [[30, 100]] }, page.getViewport({ scale: 1 }));
+  assert.equal(legacy.size, 36);
+  close(legacy.cx, 300); close(legacy.cy, 400);
 });
 
 test('rotation and output filenames are normalized', () => {
@@ -324,7 +333,7 @@ for (const rotation of [0, 90, 180, 270]) for (const userUnit of [1, 2]) {
           runs: [{ start: 1, end: 3, style: { fontSize: 20, bold: false, color: '#c02040' } }] },
         { tool: 'text', id: 'rotated-text', text: 'At 90\nPDF', fontSize: 10, fontFamily: 'monospace',
           textAlign: 'right', rotation: 90, color: '#108030', points: [[110, 160]] }],
-      watermark: { text: 'DRAFT', color: '#7060aa', opacity: 0.35 } };
+      watermark: { text: 'DRAFT', color: '#7060aa', position: 'bottom-right' } };
     const pdfPage = await preview.getPage(1);
     const viewport = pdfPage.getViewport({ scale: 1, rotation });
     record.strokes[0] = moveStroke(record.strokes[0], viewport, 7, -9);
@@ -332,7 +341,6 @@ for (const rotation of [0, 90, 180, 270]) for (const userUnit of [1, 2]) {
     const resizedInk = scaleStrokes(record.strokes.filter(item => item.tool !== 'text'), viewport, 1 / 1.1);
     let inkIndex = 0;
     record.strokes = record.strokes.map(item => item.tool === 'text' ? item : resizedInk[inkIndex++]);
-    record.watermark = moveWatermark(createCanvas(1, 1).getContext('2d'), record.watermark, viewport, 12, -15);
     const expected = createCanvas(viewport.width, viewport.height);
     const overlay = createCanvas(viewport.width, viewport.height);
     paintOverlay(overlay.getContext('2d'), record, viewport);

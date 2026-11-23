@@ -164,6 +164,32 @@ test('page reordering and deletion synchronize without losing edits to remaining
   assert.deepEqual(tab.model.pages.map(item => item.id), ['c', 'a', 'b']);
 });
 
+test('document watermark settings cover pages added concurrently and restore through shared history', async t => {
+  const original = new EditorModel();
+  original.commit([page('first')]);
+  const { panel, tab } = await setup(t, original, new Map([['pdf', source()]]));
+  const watermark = { text: 'DRAFT', color: '#736c90', position: 'top-left' };
+  panel.model.commit([...panel.model.pages, page('second')]);
+  await panel.sync.barrier();
+  tab.model.commit(tab.model.pages, { documentWatermark: watermark });
+  const applied = await tab.refresh();
+  assert.ok(!applied.conflict);
+  assert.deepEqual(tab.model.pages.map(item => item.watermark), [watermark, watermark]);
+  await panel.refresh();
+
+  tab.model.commit(tab.model.pages, { documentWatermark: null });
+  await tab.sync.barrier();
+  panel.model.commit([...panel.model.pages, page('third')]);
+  const removed = await panel.refresh();
+  assert.ok(!removed.conflict);
+  assert.deepEqual(panel.model.pages.map(item => item.watermark), [null, null, null]);
+  panel.model.undo();
+  panel.model.undo();
+  await panel.sync.barrier();
+  await tab.refresh();
+  assert.deepEqual(tab.model.pages.map(item => item.watermark), [watermark, watermark]);
+});
+
 test('the shared byte limit rejects an import without modifying the document or history', async t => {
   const original = new EditorModel();
   original.commit([page('first')]);

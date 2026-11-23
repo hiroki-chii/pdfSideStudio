@@ -3,43 +3,40 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { EditorModel, normalizeRotation } from '../src/model.js';
+import { DEFAULT_WATERMARK_FONT_SIZE } from '../src/pdf.js';
 
 const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const slice = (start, end) => app.slice(app.indexOf(start), app.indexOf(end));
 
 function setup(tool = 'watermark') {
-  const nodes = new Map(), handlers = {}, actions = {}, paints = [];
+  const nodes = new Map(), handlers = {}, actions = {};
   const $ = id => {
-    if (!nodes.has(id)) nodes.set(id, { value: '', handlers: {},
+    if (!nodes.has(id)) nodes.set(id, { value: '', handlers: {}, get valueAsNumber() { return Number(this.value); },
       addEventListener(type, handler) { this.handlers[type] = handler; },
-      dispatchEvent(event) { this.handlers[event.type]?.(event); },
     });
     return nodes.get(id);
   };
-  const range = html.match(/<input id="watermark-opacity"[^>]+>/)[0];
-  for (const name of ['min', 'max', 'value']) $('watermark-opacity')[name] = range.match(new RegExp(`${name}="([^"]+)"`))[1];
   $('watermark-text').value = 'DRAFT'; $('watermark-color').value = '#736c90';
-  $('watermark-scope').value = 'all'; $('rotation-scope').value = 'active';
+  Object.assign($('watermark-size'), { value: '36', min: '8', max: '96' });
+  $('watermark-position').value = 'top-center'; $('rotation-scope').value = 'active';
   const watermark = { text: 'Original', color: '#123456', opacity: 0.3, points: [[20, 30]] };
   const model = new EditorModel();
   model.commit([{ id: 'a', rotation: 0, strokes: [], watermark },
     { id: 'b', rotation: 270, strokes: [], watermark: null }]);
-  const context = vm.createContext({ $, model, normalizeRotation, Event,
+  const context = vm.createContext({ $, model, normalizeRotation, DEFAULT_WATERMARK_FONT_SIZE, editorTab: true,
     document: { addEventListener(type, handler) { handlers[type] = handler; } },
     activePreviewMenu: tool, selectedAnnotationId: null, viewport: {},
     busy: false, stroke: null, annotationDrag: null, pageDrag: null, textEdit: null,
-    selectedAnnotation: () => context.selectedAnnotationId === 'watermark' ? { ...model.active.watermark, tool: 'watermark' } : null,
+    selectedAnnotation: () => context.selectedAnnotationId ? { tool: 'text' } : null,
     activeRequired: () => model.active, refresh() {}, status() {}, navigatePage() {}, moveSelectedAnnotation() {},
-    paintTextPreview() { paints.push(model.active.watermark.opacity); },
     refreshAnnotationHandles() {}, refreshThumbnails() {}, updateControls() {},
     on(id, action) { actions[id] = action; }, run(action) { action(); },
     handleTextShortcut: () => false, handlePenShortcut: () => false,
   });
   vm.runInContext([
     slice('function rotate(', '\nasync function printPdf()'),
-    slice('function watermarkTargets()', "\non('remove-watermark'"),
-    slice("$('watermark-opacity').addEventListener('input'", '\n\nfunction selectedText()'),
+    slice('function syncWatermarkControls()', '\nfunction pageActionRequired('),
     slice('function handlePageToolShortcut(', '\nfunction deleteSelectedAnnotation()'),
     slice("document.addEventListener('keydown', event => {", '\nlet resizeTimer;'),
   ].join('\n'), context);
@@ -49,78 +46,116 @@ function setup(tool = 'watermark') {
     handlers.keydown(event);
     return event;
   }
-  return { $, model, context, actions, key, watermark, paints };
+  return { $, model, context, actions, key, watermark };
 }
 
-test('watermark shortcuts adjust settings by 1%, update the output, and apply to the chosen scope with history', () => {
-  const { $, model, key, actions, watermark } = setup();
+test('the watermark form applies or removes its settings on all pages in one history entry', () => {
+  const form = html.match(/<section id="panel-watermark"[^>]*>([\s\S]*?)<\/section>/)[1];
+  assert.deepEqual(Array.from(form.matchAll(/<(?:input|select) id="([^"]+)"/g), match => match[1]),
+    ['watermark-text', 'watermark-color', 'watermark-size', 'watermark-position']);
+  assert.match(form, /id="watermark-size"[^>]*min="8" max="96" step="1" value="36"/);
+  assert.deepEqual(Array.from(form.matchAll(/<option value="([^"]+)"/g), match => match[1]),
+    ['top-left', 'top-center', 'top-right', 'middle-left', 'center', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right']);
+  assert.match(form, /id="apply-watermark"[^>]*>適用<\/button>/);
+  assert.match(form, /id="remove-watermark"[^>]*>削除<\/button>/);
+  const { $, model, actions, watermark } = setup();
   const history = model.past.length;
-  const event = key('ArrowRight');
-  assert.equal(event.defaultPrevented && event.stopped, true);
-  assert.equal(Number($('watermark-opacity').value), 21);
-  assert.equal($('watermark-opacity-value').value, '21%');
-  key('ArrowRight', { repeat: true }); key('ArrowLeft');
-  assert.equal(Number($('watermark-opacity').value), 21);
-  assert.equal(model.active.watermark, watermark);
-  assert.equal(model.past.length, history);
+  $('watermark-text').value = '   ';
+  assert.throws(actions['apply-watermark'], /透かしのテキスト/);
+  $('watermark-text').value = ' DRAFT ';
+  $('watermark-size').value = '97';
+  assert.throws(actions['apply-watermark'], /8〜96 pt/);
+  $('watermark-size').value = '48';
   actions['apply-watermark']();
-  assert.ok(model.pages.every(page => page.watermark.opacity === 0.21));
-  assert.deepEqual(model.active.watermark.points, watermark.points);
-  model.undo(); assert.equal(model.active.watermark, watermark); assert.equal(model.pages[1].watermark, null);
-  model.redo(); assert.equal(model.active.watermark.opacity, 0.21);
-  $('watermark-scope').value = 'active'; key('ArrowLeft'); actions['apply-watermark']();
-  assert.equal(model.active.watermark.opacity, 0.2); assert.equal(model.pages[1].watermark.opacity, 0.21);
+  const applied = { ...model.documentWatermark };
+  assert.deepEqual(applied, { text: 'DRAFT', color: '#736c90', position: 'top-center', fontSize: 48 });
+  assert.equal(model.past.length, history + 1);
+  assert.ok(model.pages.every(page => page.watermark === model.documentWatermark));
+  model.undo();
+  assert.equal(model.active.watermark, watermark);
+  assert.equal(model.pages[1].watermark, null);
+  model.redo();
+  model.commit([...model.pages, { id: 'c', rotation: 90, strokes: [], watermark: null }]);
+  assert.ok(model.pages.every(page => page.watermark === model.documentWatermark));
+  actions['remove-watermark']();
+  assert.ok(model.pages.every(page => page.watermark === null));
+  assert.equal(model.documentWatermark, null);
+  model.undo();
+  assert.deepEqual({ ...model.documentWatermark }, applied);
+  assert.ok(model.pages.every(page => page.watermark === model.documentWatermark));
 });
 
-test('selected watermark shortcuts immediately update only the selected object, preserve selection and support undo/redo', () => {
-  const { $, context, model, key, watermark, paints } = setup('select');
-  context.selectedAnnotationId = 'watermark';
-  context.previewMenuOpen = false;
-  const otherPage = { ...model.pages[1], watermark: { ...watermark, opacity: 0.6 } };
-  const stroke = { id: 'text', tool: 'text', text: 'Keep' };
-  model.commit([{ ...model.active, strokes: [stroke] }, otherPage]);
+test('confirming each watermark setting updates all pages only after application', () => {
+  const { $, model, actions, context } = setup();
+  const text = $('watermark-text'), color = $('watermark-color'), position = $('watermark-position'), size = $('watermark-size');
   const history = model.past.length;
-  // Pending menu settings must not overwrite the selected object's properties.
-  $('watermark-opacity').value = 65;
-  const event = key('ArrowRight');
-  assert.equal(event.defaultPrevented && event.stopped, true);
-  assert.equal(model.active.watermark.opacity, 0.31);
-  assert.equal(Number($('watermark-opacity').value), 31);
-  assert.equal($('watermark-opacity-value').value, '31%');
-  assert.deepEqual({ ...model.active.watermark, opacity: watermark.opacity }, watermark);
-  assert.equal(model.active.strokes[0], stroke); assert.equal(model.pages[1], otherPage);
-  assert.equal(context.selectedAnnotationId, 'watermark'); assert.equal(context.previewMenuOpen, false);
-  assert.equal(model.past.length, history + 1); assert.deepEqual(paints, [0.31]);
-  key('ArrowRight', { repeat: true }); assert.equal(model.active.watermark.opacity, 0.32);
-  model.undo(); assert.equal(model.active.watermark.opacity, 0.31);
-  model.undo(); assert.equal(model.active.watermark, watermark);
-  model.redo(); assert.equal(model.active.watermark.opacity, 0.31);
-  key('ArrowLeft'); assert.equal(model.active.watermark.opacity, 0.3);
-  assert.equal(model.pages[1], otherPage);
+  text.value = 'Original draft';
+  text.handlers.change();
+  assert.equal(model.past.length, history);
+  assert.equal(model.documentWatermark, undefined);
+  actions['apply-watermark']();
+
+  const assertApplied = expected => {
+    assert.deepEqual({ ...model.documentWatermark }, expected);
+    assert.ok(model.pages.every(page => page.watermark === model.documentWatermark));
+  };
+  const original = { text: 'Original draft', color: '#736c90', position: 'top-center', fontSize: 36 };
+  const withText = { ...original, text: 'Revised' };
+  text.value = ' Revised ';
+  text.handlers.keydown({ key: 'Enter', isComposing: true });
+  assertApplied(original);
+  text.handlers.keydown({ key: 'Enter', preventDefault() {} });
+  assertApplied(withText);
+  text.handlers.change();
+  assert.equal(model.past.length, history + 2);
+
+  color.value = '#aa1122';
+  color.handlers.change();
+  const withColor = { ...withText, color: '#aa1122' };
+  assertApplied(withColor);
+  position.value = 'bottom-right';
+  position.handlers.change();
+  const withPosition = { ...withColor, position: 'bottom-right' };
+  assertApplied(withPosition);
+  size.value = '64';
+  size.handlers.keydown({ key: 'Enter', preventDefault() {} });
+  const withSize = { ...withPosition, fontSize: 64 };
+  assertApplied(withSize);
+  for (const invalid of ['', '5', '37.5', '97']) {
+    size.value = invalid;
+    size.handlers.change();
+    assert.equal(Number(size.value), 64);
+    assertApplied(withSize);
+  }
+  text.value = '  ';
+  text.handlers.change();
+  assert.equal(text.value, 'Revised');
+  actions['apply-watermark']();
+  assert.equal(model.past.length, history + 5);
+  model.undo();
+  context.syncWatermarkControls();
+  assert.equal(Number(size.value), 36);
+  assertApplied(withPosition);
+  model.redo();
+  context.syncWatermarkControls();
+  assert.equal(Number(size.value), 64);
+  assertApplied(withSize);
+
+  actions['remove-watermark']();
+  position.value = 'center';
+  position.handlers.change();
+  assert.ok(model.pages.every(page => page.watermark === null));
 });
 
-test('selected watermark shortcuts clamp limits without creating history or clearing redo, including focused controls', () => {
-  const { $, context, model, key, paints } = setup('select');
-  context.selectedAnnotationId = 'watermark';
-  const sliderTarget = { closest: () => $('watermark-opacity') };
-  for (const [value, direction, expected] of [[5, 'ArrowLeft', 5], [70, 'ArrowRight', 70],
-    [5, 'ArrowRight', 6], [70, 'ArrowLeft', 69]]) {
-    model.update(new Set([model.activeId]), page => ({ ...page, watermark: { ...page.watermark, opacity: value / 100 } }));
-    model.commit(model.pages); model.undo();
-    const history = model.past.length, redo = model.future.length, paintCount = paints.length;
-    const event = key(direction, { target: sliderTarget });
-    assert.equal(event.defaultPrevented && event.stopped, true);
-    assert.equal(model.active.watermark.opacity, expected / 100);
-    assert.equal(Number($('watermark-opacity').value), expected);
-    assert.equal($('watermark-opacity-value').value, `${expected}%`);
-    assert.equal(model.past.length, history + Number(value !== expected));
-    assert.equal(model.future.length, value === expected ? redo : 0);
-    assert.equal(paints.length, paintCount + Number(value !== expected));
+test('watermark settings leave every former opacity shortcut unhandled', () => {
+  const { $, model, key } = setup();
+  const pages = model.pages;
+  for (const direction of ['ArrowLeft', 'ArrowRight']) {
+    assert.equal(key(direction).defaultPrevented, undefined);
+    assert.equal(key(direction, { target: { closest: () => $('watermark-position') } }).defaultPrevented, undefined);
   }
-  key('ArrowLeft', { ctrlKey: false, metaKey: true });
-  assert.equal(Number($('watermark-opacity').value), 68);
-  key('ArrowLeft', { target: { closest: () => $('watermark-scope') } });
-  assert.equal(Number($('watermark-opacity').value), 67);
+  assert.equal(model.pages, pages);
+  assert.equal($('watermark-position').value, 'top-center');
 });
 
 test('rotation shortcuts rotate 90 degrees, normalize angles, respect page scope and support undo/redo', () => {
@@ -140,41 +175,39 @@ test('rotation shortcuts rotate 90 degrees, normalize angles, respect page scope
 
 test('page tool shortcuts leave typing, other tools, dialogs, IME and ongoing operations unchanged', () => {
   const guardedSetup = tool => {
-    const env = setup(tool === 'selected-watermark' ? 'select' : tool);
-    if (tool === 'selected-watermark') env.context.selectedAnnotationId = 'watermark';
+    const env = setup(tool === 'selected-text' ? 'rotation' : tool);
+    if (tool === 'selected-text') env.context.selectedAnnotationId = 'text';
     return env;
   };
-  for (const tool of ['watermark', 'rotation', 'selected-watermark']) {
+  for (const tool of ['watermark', 'rotation', 'selected-text']) {
     for (const extra of [{ ctrlKey: false }, { altKey: true }, { shiftKey: true }, { defaultPrevented: true },
       { isComposing: true }, { keyCode: 229 }, { target: { closest: () => ({}) } }]) {
-      const { $, model, key } = guardedSetup(tool);
+      const { model, key } = guardedSetup(tool);
       const pages = model.pages, history = model.past.length;
       key('ArrowRight', extra);
-      assert.equal(Number($('watermark-opacity').value), 20);
       assert.equal(model.pages, pages); assert.equal(model.past.length, history);
     }
     for (const field of ['busy', 'stroke', 'annotationDrag', 'pageDrag', 'textEdit', 'viewport']) {
-      const { $, model, context, key } = guardedSetup(tool);
+      const { model, context, key } = guardedSetup(tool);
       context[field] = field === 'viewport' ? null : true;
       const pages = model.pages;
       const event = key('ArrowRight');
       assert.equal(event.defaultPrevented, undefined);
-      assert.equal(Number($('watermark-opacity').value), 20); assert.equal(model.pages, pages);
+      assert.equal(model.pages, pages);
     }
     for (const dialog of ['help-dialog', 'tool-help-dialog', 'save-dialog', 'fullscreen-preview']) {
       const { $, model, key } = guardedSetup(tool);
       $(dialog).open = true;
       const pages = model.pages;
       assert.equal(key('ArrowRight').defaultPrevented, undefined);
-      assert.equal(Number($('watermark-opacity').value), 20); assert.equal(model.pages, pages);
+      assert.equal(model.pages, pages);
     }
     const { context, key } = guardedSetup(tool);
     context.model.activeId = null;
     assert.equal(key('ArrowRight').defaultPrevented, undefined);
   }
   for (const tool of ['select', 'pen', 'text', 'stamp']) {
-    const { $, key } = setup(tool);
+    const { key } = setup(tool);
     assert.equal(key('ArrowRight').defaultPrevented, undefined);
-    assert.equal(Number($('watermark-opacity').value), 20);
   }
 });

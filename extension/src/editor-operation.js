@@ -6,7 +6,8 @@ function equal(a, b) {
 }
 const ids = items => items.map(item => item.id);
 const byId = items => new Map(items.map(item => [item.id, item]));
-const sameDocument = (a, b) => !!a && !!b && a.nextStampNumber === b.nextStampNumber && equal(a.pages, b.pages);
+const sameDocument = (a, b) => !!a && !!b && a.nextStampNumber === b.nextStampNumber
+  && equal(a.documentWatermark, b.documentWatermark) && equal(a.pages, b.pages);
 
 function conflict() {
   throw new Error('別の画面で同じ内容が変更されました。最新の状態で操作をやり直してください。');
@@ -82,17 +83,20 @@ function mergePage(current, before, after) {
 export function createEditorOperation({ type, before, after }) {
   if (type !== 'commit') return { type, before, after };
   return { type, pages: diffList(before.pages, after.pages), activeId: after.activeId,
-    stamp: before.nextStampNumber === after.nextStampNumber ? null : [before.nextStampNumber, after.nextStampNumber] };
+    stamp: before.nextStampNumber === after.nextStampNumber ? null : [before.nextStampNumber, after.nextStampNumber],
+    watermark: equal(before.documentWatermark, after.documentWatermark) ? null : [before.documentWatermark, after.documentWatermark] };
 }
 
 export function applyEditorOperation(model, operation, checkSources = () => {}) {
   const { type } = operation;
   if (type === 'commit') {
-    const { pages, activeId, stamp } = operation;
+    const { pages, activeId, stamp, watermark } = operation;
     if (stamp && model.nextStampNumber !== stamp[0]) conflict();
+    if (watermark && !equal(model.documentWatermark, watermark[0])) conflict();
     const updated = mergeList(model.pages, pages, mergePage);
     checkSources(updated);
-    model.commit(updated, { activeId, nextStampNumber: stamp?.[1] ?? model.nextStampNumber });
+    model.commit(updated, { activeId, nextStampNumber: stamp?.[1] ?? model.nextStampNumber,
+      documentWatermark: watermark ? watermark[1] : model.documentWatermark });
   } else if (type === 'undo' || type === 'redo') {
     const history = type === 'undo' ? model.past : model.future;
     if (operation.before && (!sameDocument(model.snapshot(), operation.before)

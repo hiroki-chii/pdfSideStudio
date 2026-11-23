@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { createCanvas } from '@napi-rs/canvas';
 import { EditorModel } from '../src/model.js';
+import { orderedStrokes } from '../src/annotation-layers.js';
 import { textFont, textFontFamily, textLayout, moveText, moveTextTail, moveStroke, strokeLayout, paintOverlay } from '../src/pdf.js';
 import { styledRuns, textStyle, textBackground, formatTextBackground, formatText, replaceText } from '../src/text-format.js';
 
@@ -60,7 +61,7 @@ function setup() {
     convertToPdfPoint: (x, y) => [x, y], convertToViewportPoint: (x, y) => [x, y] };
   const errors = [];
   const context = vm.createContext({ $, model, viewport, textLayout, moveText, moveStroke, strokeLayout, paintOverlay, textFontFamily,
-    styledRuns, textStyle, textBackground, formatTextBackground, formatText, replaceText,
+    styledRuns, textStyle, textBackground, formatTextBackground, formatText, replaceText, orderedStrokes,
     createTextEditor(annotation) {
       const editor = node(); editor.value = annotation.text;
       editor.getAnnotation = () => replaceText(context.textEdit?.draft || annotation, editor.value);

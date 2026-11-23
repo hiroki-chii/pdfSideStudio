@@ -2,7 +2,7 @@ import './style.css';
 import './theme.css';
 import './editor-tab.css';
 import { EditorModel, MAX_FILE_BYTES, safeFilename, normalizeRotation, sourceAppearance } from './model.js';
-import { paintOverlay, textFontFamily, textLayout, moveText, moveTextTail, strokeLayout, moveStroke, scaleStrokes, watermarkLayout, moveWatermark } from './pdf.js';
+import { paintOverlay, textFontFamily, textLayout, moveText, moveTextTail, strokeLayout, moveStroke, scaleStrokes, DEFAULT_WATERMARK_FONT_SIZE } from './pdf.js';
 import { createThemeController } from './theme.js';
 import { storePrintJob, deletePrintJob, purgeLegacyPrintJobs } from './print-job.js';
 import { createDocumentJobBroker } from './document-job.js';
@@ -16,6 +16,7 @@ import { download } from './download.js';
 import { openPdfPreview, readPdfSource, pdfErrorMessage } from './pdf-source.js';
 import { createToolHelp } from './tool-help.js';
 import { createImageAnnotation, imageLayout, moveImage, prepareOverlayImages, resizeImageFromHandle, restoreImageAspectRatio } from './image-overlay.js';
+import { orderedStrokes, moveAnnotationLayers } from './annotation-layers.js';
 
 const $ = id => document.getElementById(id);
 const editorUrl = new URL(location.href);
@@ -115,13 +116,13 @@ const previewMenus = ['rotation', 'pen', 'stamp', 'watermark', 'image'];
 let activePreviewMenu = editorTab ? 'select' : 'rotation';
 let previewMenuOpen = false;
 const toolDescriptions = {
-  'open-select': '追加した文字・描画・画像・透かしをクリックして選択。ドラッグで移動、Deleteで削除。Escで選択モードに戻ります。',
+  'open-select': '追加した文字・描画・画像をクリックして選択。ドラッグで移動、Deleteで削除。Escで選択モードに戻ります。',
   'open-pen': '色・太さ・透明度を設定して紙面をドラッグ。「選択」またはEscで選択モードに戻ります。',
   'open-text': '紙面をクリックしてテキストを1つ追加。「入力を確定」で選択モードに戻ります。配置前のEscで終了。',
   'open-image': '画像を追加するメニューを開きます。選択した画像の透明度も調整できます。',
   'open-stamp': '紙面をクリックするたびに番号を配置し、次の番号を1つ増やします。Escで選択モードに戻ります。',
   'open-rotation': '対象ページを選び、方向ボタンまたはCtrl＋←／→で左右90度ずつ回転。「元に戻す」で取り消せます。',
-  'open-watermark': '文字・色・不透明度・対象を設定し、「適用」で反映。透かし選択中はCtrl＋←／→で不透明度を1%ずつすぐ変更できます。対象ページの追加済み透かしを置き換えます。',
+  'open-watermark': 'テキスト・色・文字サイズ・位置を選んで、全ページの最前面に透かしを適用します。',
 };
 for (const [id, description] of Object.entries(toolDescriptions)) {
   const button = $(id);
@@ -174,14 +175,14 @@ function updateControls() {
   $('print').disabled = busy || !model.pages.length;
   const selected = selectedAnnotation();
   if (!selected) selectedAnnotationId = null;
+  updateLayerControls(selected);
   const textSelected = !!(selectedText() || textEdit);
   const strokeSelected = !!selectedStroke();
   const selectedMenu = strokeSelected ? 'pen' : textEnabled || textSelected ? 'text'
-    : ['image', 'watermark'].includes(selected?.tool) ? selected.tool : activePreviewMenu;
+    : selected?.tool === 'image' ? 'image' : activePreviewMenu;
   const visibleMenu = previewMenuOpen ? selectedMenu : null;
-  const pressedMenu = !editorTab && selected?.tool === 'watermark' ? activePreviewMenu : selectedMenu;
   $('open-select').disabled = busy || !model.active;
-  $('open-select').setAttribute('aria-pressed', String(pressedMenu === 'select'));
+  $('open-select').setAttribute('aria-pressed', String(selectedMenu === 'select'));
   $('open-select').setAttribute('aria-controls', 'panel-select');
   $('open-select').setAttribute('aria-expanded', String(visibleMenu === 'select' && !!model.active));
   $('panel-select').hidden = !model.active || visibleMenu !== 'select';
@@ -231,7 +232,7 @@ function updateControls() {
     : '外側クリック・Ctrl+Enter・Escで入力を確定。「入力を取り消す」で変更を取り消します。書式は「テキスト」ツールから設定できます。';
   $('open-text').hidden = !model.pages.length;
   $('open-text').disabled = busy || !model.active || strokeSelected;
-  $('open-text').setAttribute('aria-pressed', String(pressedMenu === 'text'));
+  $('open-text').setAttribute('aria-pressed', String(selectedMenu === 'text'));
   $('open-text').setAttribute('aria-expanded', String(!$('panel-text').hidden));
   $('open-text').setAttribute('aria-label', textSelected ? 'テキストの書式設定' : 'テキストボックスを配置');
   $('open-text').title = textSelected ? '選択したテキストの書式設定を開く・閉じる' : toolDescriptions['open-text'];
@@ -239,32 +240,22 @@ function updateControls() {
   $('ink-canvas').classList.toggle('stamping', activePreviewMenu === 'stamp' && !busy);
   $('stamp-number').value = model.nextStampNumber;
   $('stamp-next-hint').textContent = `次に押す番号: ${model.nextStampNumber}`;
-  const watermarkPages = $('watermark-scope').value === 'all' ? model.pages : model.active ? [model.active] : [];
-  const watermarkCount = watermarkPages.filter(page => page.watermark).length;
-  $('apply-watermark').disabled = busy || !watermarkPages.length || !$('watermark-text').value.trim();
-  $('remove-watermark').disabled = busy || !watermarkCount;
-  for (const name of ['rotation', 'watermark']) {
-    const all = $(`${name}-scope`).value === 'all';
-    const target = all ? `全${model.pages.length}ページ` : `表示中の${index + 1}ページ目`;
-    $(`${name}-target-hint`).textContent = name === 'rotation'
-      ? `${target}を回転します。` : `対象: ${all ? `全${model.pages.length}ページ` : `${index + 1}ページ目`}（透かし${watermarkCount}件）`;
-    $(`${name}-target-hint`).dataset.all = String(all);
-    if (name === 'rotation') {
-      $('rotate-left').textContent = editorTab ? all ? `全${model.pages.length}ページを左90°` : '↶ 左に90°' : '↶';
-      $('rotate-right').textContent = editorTab ? all ? `全${model.pages.length}ページを右90°` : '↷ 右に90°' : '↷';
-      $('rotate-left').setAttribute('aria-label', `${target}を左に90度回転`);
-      $('rotate-right').setAttribute('aria-label', `${target}を右に90度回転`);
-    } else {
-      $('apply-watermark').textContent = all ? `全${model.pages.length}ページに適用` : 'このページに適用';
-      $('remove-watermark').textContent = all ? `全${model.pages.length}ページで削除` : 'このページで削除';
-    }
-  }
+  $('apply-watermark').disabled = busy || !model.pages.length || !$('watermark-text').value.trim();
+  $('remove-watermark').disabled = busy || !model.pages.some(page => page.watermark);
+  const rotateAll = $('rotation-scope').value === 'all';
+  const target = rotateAll ? `全${model.pages.length}ページ` : `表示中の${index + 1}ページ目`;
+  $('rotation-target-hint').textContent = `${target}を回転します。`;
+  $('rotation-target-hint').dataset.all = String(rotateAll);
+  $('rotate-left').textContent = editorTab ? rotateAll ? `全${model.pages.length}ページを左90°` : '↶ 左に90°' : '↶';
+  $('rotate-right').textContent = editorTab ? rotateAll ? `全${model.pages.length}ページを右90°` : '↷ 右に90°' : '↷';
+  $('rotate-left').setAttribute('aria-label', `${target}を左に90度回転`);
+  $('rotate-right').setAttribute('aria-label', `${target}を右に90度回転`);
   for (const name of previewMenus) {
     const open = visibleMenu === name && !!model.active;
     $(`panel-${name}`).hidden = !open;
     $(`open-${name}`).disabled = busy || !model.pages.length;
     $(`open-${name}`).setAttribute('aria-expanded', String(open));
-    $(`open-${name}`).setAttribute('aria-pressed', String(pressedMenu === name));
+    $(`open-${name}`).setAttribute('aria-pressed', String(selectedMenu === name));
   }
   for (const name of ['select', ...previewMenus]) {
     $(`open-${name}`).disabled ||= textSelected;
@@ -272,8 +263,6 @@ function updateControls() {
   }
   $('open-pen').setAttribute('aria-label', strokeSelected ? '描画の書式設定' : 'ペン');
   $('open-pen').title = strokeSelected ? '選択した描画の書式設定を開く・閉じる' : toolDescriptions['open-pen'];
-  $('watermark-menu-title').textContent = selected?.tool === 'watermark' ? '選択した透かし' : '透かしの設定';
-  $('close-watermark').textContent = selected?.tool === 'watermark' ? '選択を解除' : '選択に戻る';
   $('ink-canvas').classList.toggle('drawing', penEnabled && !busy);
   document.querySelectorAll('.page-button').forEach(button => {
     button.classList.toggle('reorderable', !busy && model.pages.length > 1);
@@ -292,6 +281,24 @@ function updateControls() {
     $('split').disabled = true;
     $('print').hidden = true;
     $('print').disabled = true;
+  }
+}
+
+function updateLayerControls(selected) {
+  const controls = $('layer-actions');
+  controls.hidden = !editorTab || !selected;
+  if (controls.hidden) return;
+  const selection = selectedLayerIds(selected);
+  const annotations = orderedStrokes(model.active);
+  const firstSelected = annotations.findIndex(item => selection.has(item.id));
+  const lastSelected = annotations.findLastIndex(item => selection.has(item.id));
+  const firstOther = annotations.findIndex(item => !selection.has(item.id));
+  const lastOther = annotations.findLastIndex(item => !selection.has(item.id));
+  const unavailable = busy || !viewport || stroke || annotationDrag || pageDrag;
+  for (const button of controls.querySelectorAll('[data-layer-direction]')) {
+    const towardFront = ['front', 'forward'].includes(button.dataset.layerDirection);
+    const canMove = towardFront ? firstSelected < lastOther : firstOther >= 0 && firstOther < lastSelected;
+    button.disabled = !!unavailable || !canMove;
   }
 }
 
@@ -968,7 +975,9 @@ async function displayEditorSession({ state, past, future, sources: sharedSource
   }
   sources.clear();
   for (const [sourceId, source] of restored) sources.set(sourceId, source);
+  const previousWatermark = model.documentWatermark;
   model.restoreSession({ state: { ...state, activeId: nextId }, past, future });
+  if (previousWatermark !== model.documentWatermark) syncWatermarkControls();
   if (view.outputName !== undefined) $('output-name').value = view.outputName;
   if (wasEmpty && model.active && $('output-name').value === 'edited') {
     $('output-name').value = safeFilename(sources.get(model.active.sourceId).outputName);
@@ -1123,7 +1132,6 @@ document.addEventListener('drop', event => {
 }, true);
 on('rotate-left', () => rotate(-90)); on('rotate-right', () => rotate(90));
 $('rotation-scope').addEventListener('change', updateControls);
-$('watermark-scope').addEventListener('change', updateControls);
 $('watermark-text').addEventListener('input', updateControls);
 function duplicatePage(id) {
   const active = pageActionRequired(id); textEnabled = false; penEnabled = false; resetPreviewMenu();
@@ -1143,8 +1151,8 @@ function rotatePage(id, angle) {
   model.update(new Set([id]), page => ({ ...page, rotation: normalizeRotation(page.rotation + angle) }));
   refresh(); status('ページを回転しました。「元に戻す」で復元できます。', 'success');
 }
-on('undo', () => { model.undo(); refresh(); status('ひとつ前の状態に戻しました。'); });
-on('redo', () => { model.redo(); refresh(); status('操作をやり直しました。'); });
+on('undo', () => { model.undo(); syncWatermarkControls(); refresh(); status('ひとつ前の状態に戻しました。'); });
+on('redo', () => { model.redo(); syncWatermarkControls(); refresh(); status('操作をやり直しました。'); });
 $('previous').addEventListener('click', () => navigatePage(-1));
 $('next').addEventListener('click', () => navigatePage(1));
 function openSaveDialog() {
@@ -1160,21 +1168,60 @@ $('save-dialog').addEventListener('cancel', event => { if (busy) event.preventDe
 on('print', printPdf);
 on('save', async () => { await exportPdf(); $('save-dialog').close(); });
 on('split', async () => { await splitPdf(); $('save-dialog').close(); });
-function watermarkTargets() { return $('watermark-scope').value === 'all' ? new Set(model.pages.map(p => p.id)) : new Set([activeRequired().id]); }
-on('apply-watermark', () => {
+function syncWatermarkControls() {
+  const watermark = model.documentWatermark ?? model.pages.find(page => page.watermark)?.watermark;
+  if (!watermark) return;
+  $('watermark-text').value = watermark.text;
+  $('watermark-color').value = watermark.color;
+  $('watermark-size').value = watermark.fontSize ?? DEFAULT_WATERMARK_FONT_SIZE;
+  $('watermark-position').value = watermark.position ?? 'center';
+}
+function watermarkFontSize() {
+  const { valueAsNumber: size, min, max } = $('watermark-size');
+  return Number.isInteger(size) && size >= Number(min) && size <= Number(max) ? size : null;
+}
+function applyWatermark() {
   const text = $('watermark-text').value.trim();
   if (!text) throw new Error('透かしのテキストを入力してください。');
-  const watermark = { text, color: $('watermark-color').value, opacity: Number($('watermark-opacity').value) / 100 };
-  const ids = watermarkTargets();
-  model.update(ids, p => ({ ...p, watermark: { ...watermark, ...(p.watermark?.points ? { points: p.watermark.points } : {}) } }));
-  refresh(); status(`${ids.size}ページに透かしを適用しました。`, 'success');
-});
+  if (!model.pages.length) return;
+  const fontSize = watermarkFontSize();
+  if (fontSize === null) {
+    const { min, max } = $('watermark-size');
+    throw new Error(`透かしの文字サイズは${min}〜${max} ptの整数を指定してください。`);
+  }
+  const watermark = { text, color: $('watermark-color').value, position: $('watermark-position').value, fontSize };
+  const current = model.documentWatermark;
+  if (current?.text === text && current.color === watermark.color && current.position === watermark.position
+    && (current.fontSize ?? DEFAULT_WATERMARK_FONT_SIZE) === fontSize) return;
+  model.commit(model.pages, { documentWatermark: watermark });
+  refresh();
+  status(current ? '全ページの透かしを更新しました。' : `全${model.pages.length}ページに透かしを適用しました。`, 'success');
+}
+function updateAppliedWatermark() {
+  if (!editorTab || busy || stroke || annotationDrag || pageDrag || !model.documentWatermark || !model.pages.length) return;
+  const input = $('watermark-text');
+  if (!input.value.trim()) {
+    input.value = model.documentWatermark.text;
+    updateControls();
+  }
+  if (watermarkFontSize() === null) $('watermark-size').value = model.documentWatermark.fontSize ?? DEFAULT_WATERMARK_FONT_SIZE;
+  applyWatermark();
+}
+for (const id of ['watermark-text', 'watermark-color', 'watermark-position', 'watermark-size']) {
+  $(id).addEventListener('change', updateAppliedWatermark);
+}
+for (const id of ['watermark-text', 'watermark-size']) {
+  $(id).addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229 || !model.documentWatermark) return;
+    event.preventDefault();
+    updateAppliedWatermark();
+  });
+}
+on('apply-watermark', applyWatermark);
 on('remove-watermark', () => {
-  const ids = watermarkTargets();
-  const count = model.pages.filter(page => ids.has(page.id) && page.watermark).length;
-  if (!count) return;
-  model.update(ids, p => ({ ...p, watermark: null }));
-  refresh(); status(`${count}ページから追加した透かしを削除しました。「元に戻す」で復元できます。`);
+  if (!model.pages.some(page => page.watermark)) return;
+  model.commit(model.pages, { documentWatermark: null });
+  refresh(); status('全ページから透かしを削除しました。「元に戻す」で復元できます。');
 });
 function pageActionRequired(id) {
   const page = model.pages.find(page => page.id === id);
@@ -1195,7 +1242,6 @@ function selectPage(id) {
 function resetPreviewMenu() {
   activePreviewMenu = editorTab ? 'select' : 'rotation';
   $('rotation-scope').value = 'active';
-  $('watermark-scope').value = 'all';
 }
 function enableSelection(showMenu = false) {
   if (busy || stroke || annotationDrag || pageDrag || !finishTextEdit()) return;
@@ -1213,7 +1259,7 @@ function togglePreviewMenu(name) {
     previewMenuOpen = false; updateControls(); return;
   }
   if (name === 'select') enableSelection(true);
-  else if ((name === 'pen' && selectedStroke()) || (['image', 'watermark'].includes(name) && selectedAnnotation()?.tool === name)) {
+  else if ((name === 'pen' && selectedStroke()) || (name === 'image' && selectedAnnotation()?.tool === 'image')) {
     previewMenuOpen = true; updateControls();
   }
   else if (name === 'text') enableTextInsertion();
@@ -1227,6 +1273,7 @@ function openPreviewMenu(name) {
     previewMenuOpen = true; updateControls(); return;
   }
   if (!finishTextEdit()) return;
+  if (name === 'watermark') syncWatermarkControls();
   resetPreviewMenu();
   textEnabled = false; selectedAnnotationId = null;
   penEnabled = name === 'pen';
@@ -1254,7 +1301,6 @@ for (const button of document.querySelectorAll('[data-close-preview-menu]')) {
   });
 }
 $('start-pen').addEventListener('click', () => openPreviewMenu('pen'));
-$('watermark-opacity').addEventListener('input', () => { $('watermark-opacity-value').value = `${$('watermark-opacity').value}%`; });
 
 function selectedText() {
   return model.active?.strokes.find(item => item.tool === 'text' && item.id === selectedAnnotationId);
@@ -1265,31 +1311,44 @@ function selectedTexts() {
     && (item.id === selectedAnnotationId || selectedTextIds.has(item.id)));
 }
 function selectedAnnotation() {
-  return selectedAnnotationId ? pageAnnotations().find(item => item.id === selectedAnnotationId) : null;
+  return selectedAnnotationId ? model.active?.strokes.find(item => item.id === selectedAnnotationId) : null;
 }
 function pageAnnotations() {
-  if (!model.active) return [];
-  const watermark = model.active.watermark;
-  return watermark && viewport ? [{ ...watermark, id: 'watermark', tool: 'watermark',
-    points: watermark.points || [viewport.convertToPdfPoint(viewport.width / 2, viewport.height / 2)] }, ...model.active.strokes] : model.active.strokes;
+  return model.active ? orderedStrokes(model.active) : [];
+}
+function selectedLayerIds(selected) {
+  const ids = selected.tool === 'text' ? selectedTextIds : selectedStrokeIds;
+  return selected.tool === 'image' ? new Set([selected.id]) : new Set([selected.id, ...ids]);
+}
+function moveSelectedAnnotationLayers(direction) {
+  if (!editorTab || busy || !viewport || stroke || annotationDrag || pageDrag || !selectedAnnotation() || !finishTextEdit()) return;
+  const selected = selectedAnnotation();
+  if (!selected) return;
+  const annotations = orderedStrokes(model.active);
+  const reordered = moveAnnotationLayers(annotations, selectedLayerIds(selected), direction);
+  if (reordered.every((item, index) => item === annotations[index])) return;
+  model.update(new Set([model.activeId]), page => ({ ...page, layerOrder: reordered.map(item => item.id) }));
+  paintTextPreview(); refreshAnnotationHandles(); refreshThumbnails(); updateControls();
+  status('重なり順を変更しました。', 'success');
+}
+for (const button of $('layer-actions').querySelectorAll('[data-layer-direction]')) {
+  button.addEventListener('click', () => moveSelectedAnnotationLayers(button.dataset.layerDirection));
 }
 function replaceAnnotation(page, original, current) {
-  if (original.tool === 'watermark') return { ...page, watermark: current };
   return { ...page, strokes: page.strokes.map(item => item.id === original.id ? current : item) };
 }
 function selectedStroke() {
   const annotation = selectedAnnotation();
-  return annotation && !['text', 'watermark', 'image'].includes(annotation.tool) ? annotation : null;
+  return annotation && !['text', 'image'].includes(annotation.tool) ? annotation : null;
 }
 function moveAnnotation(annotation, dx, dy) {
-  if (annotation.tool === 'watermark') return moveWatermark($('ink-canvas').getContext('2d'), annotation, viewport, dx, dy);
   if (annotation.tool === 'image') return moveImage(annotation, viewport, dx, dy);
   return annotation.tool === 'text'
     ? moveText($('ink-canvas').getContext('2d'), annotation, viewport, dx, dy)
     : moveStroke(annotation, viewport, dx, dy);
 }
 function selectAnnotation(annotation, { toggle = false, preserve = false, openMenu = true } = {}) {
-  const isStroke = !['text', 'watermark', 'image'].includes(annotation.tool);
+  const isStroke = !['text', 'image'].includes(annotation.tool);
   const isText = annotation.tool === 'text';
   if (toggle && (isStroke || isText)) {
     finishAnnotationFormatting();
@@ -1317,12 +1376,6 @@ function selectAnnotation(annotation, { toggle = false, preserve = false, openMe
     if (!editorTab) previewMenuOpen = false;
     syncPenControls(annotation);
   }
-  if (annotation.tool === 'watermark') {
-    $('watermark-text').value = annotation.text; $('watermark-color').value = annotation.color;
-    $('watermark-opacity').value = annotation.opacity * 100;
-    $('watermark-opacity-value').value = `${annotation.opacity * 100}%`;
-    $('watermark-scope').value = 'active';
-  }
   if (annotation.tool === 'text') {
     $('text-size').value = annotation.fontSize;
     $('text-font').value = annotation.fontFamily || 'sans-serif';
@@ -1341,7 +1394,7 @@ function selectAnnotation(annotation, { toggle = false, preserve = false, openMe
 }
 function selectedStrokes() {
   if (!selectedStroke()) return [];
-  return model.active.strokes.filter(item => !['text', 'watermark', 'image'].includes(item.tool)
+  return model.active.strokes.filter(item => !['text', 'image'].includes(item.tool)
     && (item.id === selectedAnnotationId || selectedStrokeIds.has(item.id)));
 }
 function syncPenControls(annotation = selectedStroke()) {
@@ -1425,9 +1478,26 @@ function paintTextPreview() {
   if (!viewport || !model.active) return;
   const draft = textEdit?.draft;
   const framedDraft = draft?.boxShape === 'bubble' || (draft?.stampPattern && draft.stampPattern !== 'plain') ? draft : null;
-  paintOverlay($('ink-canvas').getContext('2d'), { ...model.active,
-    strokes: [...model.active.strokes.filter(item => item.id !== textEdit?.original?.id)
-      .map(annotationPreview), ...(framedDraft ? [framedDraft] : [])] }, viewport, { hideTextFor: framedDraft?.id });
+  const originalId = textEdit?.original?.id;
+  const strokes = model.active.strokes.flatMap(item => originalId && item.id === originalId
+    ? (framedDraft ? [framedDraft] : []) : [annotationPreview(item)]);
+  if (framedDraft && !originalId) strokes.push(framedDraft);
+  const ink = $('ink-canvas');
+  const watermark = model.active.watermark;
+  const draftWatermark = $('text-edit-watermark');
+  // A live text editor sits above the ink canvas, so paint its watermark above it.
+  if (textEdit && watermark) {
+    if (draftWatermark.width !== ink.width || draftWatermark.height !== ink.height) {
+      draftWatermark.width = ink.width; draftWatermark.height = ink.height;
+    }
+    paintOverlay(draftWatermark.getContext('2d'), { strokes: [], watermark }, viewport);
+    draftWatermark.hidden = false;
+  } else if (!draftWatermark.hidden) {
+    draftWatermark.hidden = true;
+    draftWatermark.width = draftWatermark.height = 0;
+  }
+  paintOverlay(ink.getContext('2d'), { ...model.active, strokes, watermark: draftWatermark.hidden ? watermark : null },
+    viewport, { hideTextFor: framedDraft?.id });
 }
 
 function positionTextEditor() {
@@ -1878,28 +1948,14 @@ function handlePageToolShortcut(event) {
   if (busy || stroke || annotationDrag || pageDrag || !viewport || !model.active || textEdit
     || event.defaultPrevented || event.isComposing || event.keyCode === 229
     || event.altKey || event.shiftKey || (!event.ctrlKey && !event.metaKey)
-    || $('help-dialog').open || $('tool-help-dialog').open || $('save-dialog').open || $('fullscreen-preview').open) return false;
+    || $('help-dialog').open || $('tool-help-dialog').open || $('save-dialog').open || $('fullscreen-preview').open
+    || activePreviewMenu !== 'rotation' || selectedAnnotation()) return false;
   const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
   if (!step) return false;
-  const annotation = selectedAnnotation();
-  if (annotation && annotation.tool !== 'watermark') return false;
-  const tool = annotation ? 'watermark' : activePreviewMenu;
-  if (!['watermark', 'rotation'].includes(tool)) return false;
   const editable = event.target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])');
-  const opacity = $('watermark-opacity');
-  if (editable && editable !== $(`${tool}-scope`) && (tool !== 'watermark' || editable !== opacity)) return false;
+  if (editable && editable !== $('rotation-scope')) return false;
   event.preventDefault(); event.stopPropagation();
-  if (tool === 'rotation') run(() => rotate(step * 90));
-  else {
-    const current = annotation ? Math.round(annotation.opacity * 100) : Number(opacity.value);
-    const next = Math.max(Number(opacity.min), Math.min(Number(opacity.max), current + step));
-    opacity.value = next;
-    opacity.dispatchEvent(new Event('input', { bubbles: true }));
-    if (annotation && next / 100 !== annotation.opacity) {
-      model.update(new Set([model.activeId]), page => ({ ...page, watermark: { ...page.watermark, opacity: next / 100 } }));
-      paintTextPreview(); refreshAnnotationHandles(); refreshThumbnails(); updateControls();
-    }
-  }
+  run(() => rotate(step * 90));
   return true;
 }
 function deleteSelectedAnnotation() {
@@ -1907,12 +1963,11 @@ function deleteSelectedAnnotation() {
   if (!annotation) return;
   const selection = selectedText() ? selectedTexts() : selectedStrokes();
   const ids = new Set(selection.length ? selection.map(item => item.id) : [annotation.id]);
-  model.update(new Set([model.activeId]), p => annotation.tool === 'watermark' ? { ...p, watermark: null }
-    : { ...p, strokes: p.strokes.filter(item => !ids.has(item.id)) });
+  model.update(new Set([model.activeId]), p => ({ ...p, strokes: p.strokes.filter(item => !ids.has(item.id)) }));
   resetPreviewMenu();
   if (editorTab) previewMenuOpen = false;
   selectedAnnotationId = null; selectedStrokeIds.clear(); selectedTextIds.clear(); refresh();
-  const label = { text: 'テキスト', watermark: '透かし', image: '画像' }[annotation.tool] ?? '描画';
+  const label = { text: 'テキスト', image: '画像' }[annotation.tool] ?? '描画';
   status(`選択した${label}${ids.size > 1 ? `（${ids.size}件）` : ''}を削除しました。「元に戻す」で復元できます。`);
 }
 on('delete-text', deleteSelectedAnnotation);
@@ -1958,8 +2013,7 @@ function replaceStrokes(page, currents) {
 function positionAnnotationHandle(button, annotation) {
   const layout = annotation.tool === 'text'
     ? textLayout($('ink-canvas').getContext('2d'), annotation, viewport)
-    : annotation.tool === 'watermark' ? watermarkLayout($('ink-canvas').getContext('2d'), annotation, viewport)
-      : annotation.tool === 'image' ? imageLayout(annotation, viewport) : strokeLayout(annotation, viewport);
+    : annotation.tool === 'image' ? imageLayout(annotation, viewport) : strokeLayout(annotation, viewport);
   const scale = $('ink-canvas').getBoundingClientRect().width / viewport.width;
   const padding = annotation.tool === 'text' ? 0 : Math.max(0, (8 - Math.min(layout.width, layout.height) * scale) / 2);
   Object.assign(button.style, { left: `${layout.x * scale - padding}px`, top: `${layout.y * scale - padding}px`,
@@ -2003,31 +2057,33 @@ function refreshAnnotationHandles() {
   }
   if (!model.active || !viewport) return;
   const handles = new Map([...$('text-handles').querySelectorAll('.text-handle')].map(button => [button.dataset.annotationId, button]));
-  for (const annotation of pageAnnotations()) {
+  const annotations = pageAnnotations();
+  const selected = selectedAnnotation();
+  const selectedIds = selected ? selectedLayerIds(selected) : new Set();
+  for (const [index, annotation] of annotations.entries()) {
     if (!annotation.id || !annotation.points.length) continue;
     if (annotation.id === textEdit?.original?.id) continue;
     const existing = handles.get(annotation.id);
     const button = existing || document.createElement('button');
     handles.delete(annotation.id);
     const isText = annotation.tool === 'text', isImage = annotation.tool === 'image';
-    const selected = annotation.id === selectedAnnotationId || (selectedStroke() && selectedStrokeIds.has(annotation.id))
-      || (selectedText() && selectedTextIds.has(annotation.id));
-    button.type = 'button'; button.className = `text-handle${isText || isImage ? '' : ' stroke-handle'}${selected ? ' selected' : ''}`;
+    const isSelected = selectedIds.has(annotation.id);
+    button.type = 'button'; button.className = `text-handle${isText || isImage ? '' : ' stroke-handle'}${isSelected ? ' selected' : ''}`;
+    // Keep hit targets in paint order, behind the active editor and resize handles.
+    button.style.zIndex = index - annotations.length;
     button.dataset.annotationId = annotation.id;
     if (isText) button.dataset.textId = annotation.id;
     const textAction = annotation.boxShape === 'bubble' ? '吹き出しを選択・移動' : 'テキストを移動';
-    button.setAttribute('aria-label', isText ? `${textAction}: ${annotation.text}` : isImage ? '画像を選択・移動'
-      : annotation.tool === 'watermark' ? `透かしを選択・移動: ${annotation.text}` : '描画を選択・移動');
-    button.setAttribute('aria-pressed', String(!!selected));
+    button.setAttribute('aria-label', isText ? `${textAction}: ${annotation.text}` : isImage ? '画像を選択・移動' : '描画を選択・移動');
+    button.setAttribute('aria-pressed', String(isSelected));
     button.title = 'クリックまたはF2で内容を編集。Ctrl+B/I/Uで太字・斜体・下線、Ctrl+↑/↓でサイズ変更、Ctrl+←/→で背景の不透明度を変更。ドラッグ・方向キーで移動、Deleteで削除。';
     if (annotation.boxShape === 'bubble') button.title = 'クリックで吹き出しを選択。選択後に本体をクリックするかF2で内容を編集。しっぽはドラッグで移動できます。';
     if (isText) button.title += ' Shift＋クリックで追加選択・解除。複数選択中はダブルクリックで個別編集。';
     if (!isText) button.title = 'クリックで選択。ドラッグで移動。方向キーで1pt、Shift＋方向キーで10pt移動。Deleteで削除。';
     if (isImage) button.title += ' 選択後は辺の中央をドラッグして幅・高さを調整、四隅をドラッグして縦横比を保ったまま拡大・縮小。';
-    const isStroke = !isText && !isImage && annotation.tool !== 'watermark';
+    const isStroke = !isText && !isImage;
     if (isStroke) button.title += ' Shift＋クリックで追加選択・解除。Ctrl＋↑／↓で太さ、Ctrl＋←／→で透明度を相対変更。Ctrl＋Shift＋↑／↓で描画を拡大・縮小。';
-    if (annotation.tool === 'watermark') button.title += ' Ctrl＋←／→で不透明度を1%ずつ変更し、すぐ反映します。';
-    button.setAttribute('aria-keyshortcuts', `${isText ? 'F2 Control+b Control+i Control+u Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight ' : isStroke ? 'Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight Control+Shift+ArrowUp Control+Shift+ArrowDown ' : isImage ? '' : 'Control+ArrowLeft Control+ArrowRight '}Delete ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown`);
+    button.setAttribute('aria-keyshortcuts', `${isText ? 'F2 Control+b Control+i Control+u Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight ' : isStroke ? 'Control+ArrowUp Control+ArrowDown Control+ArrowLeft Control+ArrowRight Control+Shift+ArrowUp Control+Shift+ArrowDown ' : ''}Delete ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown`);
     positionAnnotationHandle(button, annotationPreview(annotation));
     if (existing) continue;
     const currentText = () => pageAnnotations().find(item => item.id === button.dataset.annotationId);
@@ -2118,7 +2174,7 @@ function finishAnnotationDrag(event) {
   const [x, y] = original.points[0]; const [nextX, nextY] = current.points[0];
   if (Math.hypot(nextX - x, nextY - y) > 0.01) {
     model.update(new Set([pageId]), p => currents ? replaceStrokes(p, currents) : replaceAnnotation(p, original, current));
-    const label = { text: 'テキスト', image: '画像', watermark: '透かし' }[original.tool] ?? '描画';
+    const label = { text: 'テキスト', image: '画像' }[original.tool] ?? '描画';
     refreshThumbnails(); status(`${label}を移動しました。「元に戻す」で取り消せます。`, 'success');
     refreshAnnotationHandles();
   }

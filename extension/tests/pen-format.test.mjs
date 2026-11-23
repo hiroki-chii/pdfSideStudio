@@ -6,6 +6,7 @@ import { createCanvas } from '@napi-rs/canvas';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { EditorModel } from '../src/model.js';
+import { orderedStrokes, moveAnnotationLayers } from '../src/annotation-layers.js';
 import { paintOverlay, strokeLayout, moveStroke, scaleStrokes, buildPdf, imagePlacement } from '../src/pdf.js';
 import { styledRuns, textStyle, textBackground } from '../src/text-format.js';
 
@@ -44,7 +45,7 @@ function setup(tool = 'pen', opacity = 0.75) {
   model.commit([{ id: 'page', strokes: [original, other, text], watermark },
     { id: 'other-page', strokes: [other] }]);
   const context = vm.createContext({ $, model, canvas, paintOverlay, strokeLayout, moveStroke, scaleStrokes,
-    styledRuns, textStyle, textBackground,
+    styledRuns, textStyle, textBackground, orderedStrokes, moveAnnotationLayers,
     viewport: { width: 200, height: 200, scale: 1,
       convertToPdfPoint: (x, y) => [x, y], convertToViewportPoint: (x, y) => [x, y] },
     document: { querySelectorAll: selector => selector === 'button, input, select, textarea' ? [...nodes.values()] : [],
@@ -94,6 +95,45 @@ function installHandles({ context, $ }) {
   return handles;
 }
 
+test('layer buttons reorder a selection in one history entry without exposing the watermark as an object', () => {
+  const { context, $, model, original, other, text } = setup();
+  model.update(new Set(['page']), page => ({ ...page, strokes: [original, text, other] }));
+  const otherPage = model.pages[1];
+  const buttons = Object.fromEntries(['front', 'forward', 'back', 'backward'].map(direction => [direction, {
+    dataset: { layerDirection: direction }, addEventListener(_type, action) { this.click = action; },
+  }]));
+  $('layer-actions').querySelectorAll = () => Object.values(buttons);
+  vm.runInContext(slice("for (const button of $('layer-actions')", '\nfunction replaceAnnotation'), context);
+  context.selectAnnotation(other, { toggle: true });
+  const order = () => Array.from(context.pageAnnotations(), item => item.id);
+  const history = model.past.length;
+  assert.deepEqual(order(), ['stroke', 'text', 'other']);
+  assert.equal($('layer-actions').hidden, false);
+  assert.equal(buttons.forward.disabled, false);
+  buttons.forward.click();
+  assert.deepEqual(order(), ['text', 'stroke', 'other']);
+  assert.equal(buttons.front.disabled, true);
+  assert.equal(buttons.forward.disabled, true);
+  assert.equal(model.past.length, history + 1);
+  buttons.front.click();
+  assert.equal(model.past.length, history + 1);
+  buttons.back.click();
+  assert.deepEqual(order(), ['stroke', 'other', 'text']);
+  assert.equal(buttons.backward.disabled, true);
+  context.busy = true;
+  buttons.front.click();
+  context.busy = false;
+  assert.equal(model.past.length, history + 2);
+  assert.equal(model.pages[1], otherPage);
+  assert.deepEqual(model.active.strokes, [original, text, other]);
+  model.undo();
+  assert.deepEqual(order(), ['text', 'stroke', 'other']);
+  model.redo();
+  assert.deepEqual(order(), ['stroke', 'other', 'text']);
+  assert.deepEqual(Array.from(model.active.layerOrder), ['stroke', 'other', 'text']);
+  assert.equal(model.active.watermark.text, 'DRAFT');
+});
+
 const pointer = (x, y, extra = {}) => ({ button: 0, isPrimary: true, pointerId: 1,
   clientX: x, clientY: y, preventDefault() {}, ...extra });
 
@@ -102,10 +142,9 @@ test('the tab editor opens and highlights the selected object’s settings', () 
   vm.runInContext(slice('function enableTextInsertion()', "\n$('open-text').addEventListener"), context);
   const stamp = { ...text, id: 'stamp', text: '1', stampPattern: 'circle' };
   model.update(new Set([model.activeId]), page => ({ ...page, strokes: [...page.strokes, stamp] }));
-  const watermark = context.pageAnnotations().find(item => item.tool === 'watermark');
   const menus = ['select', 'pen', 'text', 'stamp', 'watermark', 'rotation'];
   context.editorTab = true;
-  for (const [annotation, menu] of [[original, 'pen'], [text, 'text'], [stamp, 'text'], [watermark, 'watermark']]) {
+  for (const [annotation, menu] of [[original, 'pen'], [text, 'text'], [stamp, 'text']]) {
     context.selectAnnotation(annotation);
     for (const name of menus) {
       assert.equal($(`panel-${name}`).hidden, name !== menu);

@@ -16,18 +16,25 @@ export class EditorModel {
   past = [];
   future = [];
   nextStampNumber = 1;
+  documentWatermark = undefined;
 
-  snapshot() { return { pages: this.pages, activeId: this.activeId, nextStampNumber: this.nextStampNumber }; }
+  snapshot() { return { pages: this.pages, activeId: this.activeId, nextStampNumber: this.nextStampNumber, documentWatermark: this.documentWatermark }; }
   sessionSnapshot() { return { state: this.snapshot(), past: [...this.past], future: [...this.future] }; }
   restoreSession({ state, past, future }) { this.restore(state); this.past = past; this.future = future; }
-  restore(state) { this.pages = state.pages; this.activeId = state.activeId; this.nextStampNumber = state.nextStampNumber; }
-  commit(pages, { activeId = this.activeId, nextStampNumber = this.nextStampNumber } = {}) {
+  restore(state) {
+    this.pages = state.pages; this.activeId = state.activeId; this.nextStampNumber = state.nextStampNumber;
+    this.documentWatermark = state.documentWatermark;
+  }
+  commit(pages, { activeId = this.activeId, nextStampNumber = this.nextStampNumber, documentWatermark = this.documentWatermark } = {}) {
     if (pages.length > MAX_PAGES) throw new Error(`一度に編集できるのは${MAX_PAGES}ページまでです。`);
     const before = this.snapshot();
     this.past.push(before);
     if (this.past.length > 30) this.past.shift();
     this.future = [];
-    this.pages = pages;
+    // Undefined also covers older sessions with per-page watermarks.
+    this.pages = documentWatermark === undefined ? pages
+      : pages.map(page => page.watermark === documentWatermark ? page : { ...page, watermark: documentWatermark });
+    this.documentWatermark = documentWatermark;
     this.nextStampNumber = nextStampNumber;
     this.activeId = pages.some(p => p.id === activeId) ? activeId : (pages[0]?.id ?? null);
     this.onChange?.({ type: 'commit', before, after: this.snapshot() });

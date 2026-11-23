@@ -5,7 +5,7 @@ import { createCanvas, loadImage } from '@napi-rs/canvas';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createPageOverlay, createPrintPages } from '../src/raster.js';
 import { buildPdf } from '../src/pdf-export.js';
-import { moveTextTail, textLayout } from '../src/pdf.js';
+import { moveTextTail, paintOverlay, textLayout } from '../src/pdf.js';
 import { loadLimitedPdf } from '../src/pdf-security.js';
 import { createImageAnnotation, imageLayout, moveImage, prepareOverlayImages, resizeImageFromHandle, restoreImageAspectRatio } from '../src/image-overlay.js';
 
@@ -25,6 +25,53 @@ globalThis.document = { createElement(tag) {
   canvas.toBlob = callback => callback(new Blob([canvas.toBuffer('image/png')], { type: 'image/png' }));
   canvases.push(canvas); return canvas;
 } };
+
+test('preview, saved PDF and print use the chosen watermark size and paint it above images at 20% opacity', async t => {
+  globalThis.createImageBitmap = async blob => loadImage(Buffer.from(await blob.arrayBuffer()));
+  t.after(() => { delete globalThis.createImageBitmap; });
+  const document = await PDFDocument.create();
+  document.addPage([200, 200]);
+  const preview = await pdfjs.getDocument({ data: await document.save() }).promise;
+  t.after(() => preview.loadingTask.destroy());
+  const view = (await preview.getPage(1)).getViewport({ scale: 2 });
+  const tile = createCanvas(200, 200), tileContext = tile.getContext('2d');
+  tileContext.fillStyle = '#0000ff';
+  tileContext.fillRect(0, 0, tile.width, tile.height);
+  const blob = new Blob([tile.toBuffer('image/png')], { type: 'image/png' });
+  const image = { ...createImageAnnotation('image', { blob, width: 200, height: 200 }, view), width: 200, height: 200 };
+  const watermark = { text: 'DRAFT', color: '#ff0000', opacity: 1 };
+  const original = { sourceId: 's', index: 0, rotation: 0, strokes: [image], watermark };
+  const sources = new Map([['s', { document, preview }]]);
+  const canvas = createCanvas(view.width, view.height), context = canvas.getContext('2d');
+  const countRed = () => {
+    const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let count = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (Math.abs(data[i] - 51) <= 3 && data[i + 1] <= 2 && Math.abs(data[i + 2] - 204) <= 3) count++;
+    }
+    return count;
+  };
+  await prepareOverlayImages(original);
+  paintOverlay(context, original, view);
+  const standardPixels = countRed();
+  for (const record of [original, { ...original, layerOrder: ['watermark', 'image'] },
+    { ...original, layerOrder: ['image', 'watermark'], watermark: { ...watermark, opacity: 0.05, position: 'bottom-right' } },
+    { ...original, watermark: { ...watermark, fontSize: 64 } }]) {
+    paintOverlay(context, record, view);
+    const expected = countRed();
+    assert.ok(expected > 200);
+    if (record.watermark.fontSize) assert.ok(expected > standardPixels * 1.5);
+    const saved = await pdfjs.getDocument({ data: await buildPdf([record], sources, createPageOverlay) }).promise;
+    try {
+      const page = await saved.getPage(1);
+      await page.render({ canvasContext: context, viewport: view }).promise;
+      assert.ok(Math.abs(countRed() - expected) < 10);
+    } finally { await saved.loadingTask.destroy(); }
+    const [printed] = await createPrintPages([record], sources);
+    context.drawImage(await loadImage(Buffer.from(await printed.blob.arrayBuffer())), 0, 0);
+    assert.equal(countRed(), expected);
+  }
+});
 
 test('raster service preserves overlay placement and print composition and releases canvas buffers', async () => {
   const document = await PDFDocument.create(), page = document.addPage([200, 300]);

@@ -1,6 +1,7 @@
 export { buildPdf } from './pdf-export.js';
 import { styledRuns, textStyle, textBackground } from './text-format.js';
 import { paintImage } from './image-overlay.js';
+import { orderedStrokes } from './annotation-layers.js';
 
 export function imagePlacement(viewport) {
   const [x, y] = viewport.convertToPdfPoint(0, viewport.height);
@@ -10,56 +11,59 @@ export function imagePlacement(viewport) {
     angle: Math.atan2(rightY - y, rightX - x) * 180 / Math.PI };
 }
 
+const watermarkPositions = new Map([
+  ['top-left', [-1, -1]], ['top-center', [0, -1]], ['top-right', [1, -1]],
+  ['middle-left', [-1, 0]], ['center', [0, 0]], ['middle-right', [1, 0]],
+  ['bottom-left', [-1, 1]], ['bottom-center', [0, 1]], ['bottom-right', [1, 1]],
+]);
+const watermarkFont = size => `600 ${size}px "Noto Sans JP", "Yu Gothic", "Meiryo", sans-serif`;
+export const DEFAULT_WATERMARK_FONT_SIZE = 36;
+
 export function watermarkLayout(ctx, watermark, viewport) {
-  let size = Math.min(viewport.width, viewport.height) * 0.13;
+  const { width: pageWidth, height: pageHeight, scale } = viewport;
+  const angle = -Math.PI / 6, cos = Math.cos(angle), sin = -Math.sin(angle);
+  const margin = Math.min(18 * scale, Math.min(pageWidth, pageHeight) * 0.06);
+  const availableWidth = pageWidth - 2 * margin, availableHeight = pageHeight - 2 * margin;
+  // Preserve the chosen font size when the page can fit its height.
+  const fontSize = watermark.fontSize ?? DEFAULT_WATERMARK_FONT_SIZE;
+  const size = Math.min(fontSize * scale, availableWidth / (1.6 * sin), availableHeight / (1.6 * cos));
   ctx.save();
-  ctx.font = `600 ${size}px "Noto Sans JP", "Yu Gothic", "Meiryo", sans-serif`;
+  ctx.font = watermarkFont(size);
   const measured = ctx.measureText(watermark.text).width;
-  const limit = Math.min(viewport.width, viewport.height) * 0.94;
-  if (measured > limit) size *= limit / measured;
-  ctx.font = `600 ${size}px "Noto Sans JP", "Yu Gothic", "Meiryo", sans-serif`;
-  const width = ctx.measureText(watermark.text).width, height = size * 1.3;
   ctx.restore();
-  const [cx, cy] = watermark.points ? viewport.convertToViewportPoint(...watermark.points[0]) : [viewport.width / 2, viewport.height / 2];
-  const angle = -Math.PI / 6;
-  const x = cx - width / 2 * Math.cos(angle) + height / 2 * Math.sin(angle);
-  const y = cy - width / 2 * Math.sin(angle) - height / 2 * Math.cos(angle);
-  const corners = [[0, 0], [width, 0], [0, height], [width, height]].map(([dx, dy]) =>
-    [x + dx * Math.cos(angle) - dy * Math.sin(angle), y + dx * Math.sin(angle) + dy * Math.cos(angle)]);
-  return { x, y, cx, cy, size, width, height, angle,
-    left: Math.min(...corners.map(p => p[0])), right: Math.max(...corners.map(p => p[0])),
-    top: Math.min(...corners.map(p => p[1])), bottom: Math.max(...corners.map(p => p[1])) };
+  const height = size * 1.3;
+  const width = Math.min(measured, (availableWidth - height * sin) / cos, (availableHeight - height * cos) / sin);
+  const halfWidth = (width * cos + height * sin) / 2, halfHeight = (width * sin + height * cos) / 2;
+  const [horizontal, vertical] = watermarkPositions.get(watermark.position) ?? [0, 0];
+  const cx = pageWidth / 2 + horizontal * (availableWidth / 2 - halfWidth);
+  const cy = pageHeight / 2 + vertical * (availableHeight / 2 - halfHeight);
+  return { cx, cy, size, angle, horizontalScale: measured ? width / measured : 1,
+    left: cx - halfWidth, right: cx + halfWidth, top: cy - halfHeight, bottom: cy + halfHeight };
 }
 
-export function moveWatermark(ctx, watermark, viewport, dx, dy) {
+function paintWatermark(ctx, watermark, viewport) {
   const layout = watermarkLayout(ctx, watermark, viewport);
-  const clamp = (delta, min, max) => min <= max ? Math.max(min, Math.min(max, delta)) : (min + max) / 2;
-  dx = clamp(dx, -layout.left, viewport.width - layout.right);
-  dy = clamp(dy, -layout.top, viewport.height - layout.bottom);
-  return { ...watermark, points: [viewport.convertToPdfPoint(layout.cx + dx, layout.cy + dy)] };
+  ctx.save();
+  ctx.translate(layout.cx, layout.cy);
+  ctx.rotate(layout.angle);
+  ctx.scale(layout.horizontalScale, 1);
+  ctx.font = watermarkFont(layout.size);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = watermark.color;
+  ctx.globalAlpha = 0.2;
+  ctx.fillText(watermark.text, 0, 0);
+  ctx.restore();
 }
 
 export function paintOverlay(ctx, record, viewport, { hideTextFor } = {}) {
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  if (record.watermark) {
-    const { text, color, opacity } = record.watermark;
-    const layout = watermarkLayout(ctx, record.watermark, viewport);
-    ctx.save();
-    ctx.translate(layout.cx, layout.cy);
-    ctx.rotate(layout.angle);
-    ctx.font = `600 ${layout.size}px "Noto Sans JP", "Yu Gothic", "Meiryo", sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = color;
-    ctx.globalAlpha = opacity;
-    ctx.fillText(text, 0, 0);
-    ctx.restore();
+  for (const annotation of orderedStrokes(record)) {
+    if (annotation.tool === 'text') paintText(ctx, annotation, viewport, annotation.id !== undefined && annotation.id === hideTextFor);
+    else if (annotation.tool === 'image') paintImage(ctx, annotation, viewport);
+    else paintStroke(ctx, annotation, viewport);
   }
-  for (const stroke of record.strokes) {
-    if (stroke.tool === 'text') paintText(ctx, stroke, viewport, stroke.id !== undefined && stroke.id === hideTextFor);
-    else if (stroke.tool === 'image') paintImage(ctx, stroke, viewport);
-    else paintStroke(ctx, stroke, viewport);
-  }
+  if (record.watermark) paintWatermark(ctx, record.watermark, viewport);
 }
 
 const textFonts = {
